@@ -1,0 +1,741 @@
+
+<!doctype html>
+
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, minimum-scale=1.0, initial-scale=1.0, user-scalable=yes">
+  <meta name="theme-color" content="#4F7DC9">
+  <meta charset="UTF-8">
+  <title>JSONの変換をカスタマイズするメソッドを生成する</title>
+  <link rel="stylesheet" href="//fonts.googleapis.com/css?family=Source+Code+Pro:400|Roboto:400,300,400italic,500,700|Roboto+Mono">
+  <link rel="stylesheet" href="//fonts.googleapis.com/icon?family=Material+Icons">
+  <link rel="stylesheet" href="https://storage.googleapis.com/codelab-elements/codelab-elements.css">
+  <style>
+    .success {
+      color: #1e8e3e;
+    }
+    .error {
+      color: red;
+    }
+    #codelab-nav-buttons {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <google-codelab-analytics gaid="UA-101877661-28"></google-codelab-analytics>
+  <google-codelab codelab-gaid=""
+                  id="encodingjson-generator"
+                  title="JSONの変換をカスタマイズするメソッドを生成する"
+                  environment="web"
+                  feedback-link="https://dena.github.io/codelabs/">
+    
+      <google-codelab-step label="概要" duration="1">
+        <p>GoでJSONを扱う場合、その構造を<code>struct</code>として定義することが一般的です。</p>
+<p>しかし、プログラム内では実際のJSONとは異なる型を使いたいことがあるかもしれません。</p>
+<p>例えば、JSON上では時刻を「unixtime形式」で表現し、プログラム中では「<code>time.Time</code>型」として表現することで、プログラム中で時刻の比較や計算をしやすくしたい、といったケースです。</p>
+<p>Goの<a href="https://golang.org/pkg/encoding/json/" target="_blank">encoding/json</a>パッケージには、そのためのインタフェースとして<a href="https://golang.org/pkg/encoding/json/#Marshaler" target="_blank">Marshaler</a>と<a href="https://golang.org/pkg/encoding/json/#Unmarshaler" target="_blank">Unmarshaler</a>が用意されているため、以下のようにして実現可能です。</p>
+<pre><code>// 対象の構造体
+type Resource struct {
+        ID        int64     `json:&#34;id&#34;`
+        Timestamp time.Time `json:&#34;-&#34;`
+}
+
+func (r *Resource) MarshalJSON() ([]byte, error) {
+        type Alias Resource
+        
+        // `timestamp`についてはunixtime形式に変換
+        return json.Marshal(&amp;struct {
+                *Alias
+                AliasTimestamp int64 `json:&#34;timestamp&#34;`
+        }{
+                Alias:          (*Alias)(r),
+                AliasTimestamp: r.Timestamp.Unix(),
+        })
+}
+
+func (r *Resource) UnmarshalJSON(b []byte) error {
+        type Alias Resource
+
+        // JSONからデコード
+        aux := &amp;struct {
+                *Alias
+                AliasTimestamp int64 `json:&#34;timestamp&#34;`
+        }{
+                Alias: (*Alias)(r),
+        }
+        if err := json.Unmarshal(b, &amp;aux); err != nil {
+                return err
+        }
+
+        // `Timestamp`については`time.Time`型に変換
+        r.Timestamp = time.Unix(aux.AliasTimestamp, 0)
+        return nil
+}</code></pre>
+<p>ただ、構造体ごとに似たようなコードを書く必要があるため、多くの構造体に適用するのは大変です。</p>
+<aside class="special"><p><strong>注</strong>: 対象が<code>Timestamp</code>フィールドだけであれば、JSONを表わす構造体そのものではなく、フィールドのみ独自型にしても良いでしょう。</p>
+</aside>
+<p>そこで、本コードラボでは静的解析を利用して構造体を解析し、<code>MarshalJSON</code>メソッドと<code>UnmarshalJSON</code>メソッドを自動生成するツールを作成してみます。</p>
+<p>なお、静的解析の基礎については深く解説しないため、<a href="https://golangtokyo.github.io/codelab/format-structtag/" target="_blank">こちら</a>のコードラボで学習しておくことをおすすめします。</p>
+<h2 is-upgraded><strong>学習内容</strong></h2>
+<ul>
+<li><a href="https://golang.org/pkg/text/template/" target="_blank">text/template</a>を使用してコードを生成する方法</li>
+<li><a href="https://godoc.org/golang.org/x/tools/imports" target="_blank">golang.org/x/tools/imports</a>を使用してコードのインポート文を修正する方法</li>
+<li><a href="https://golang.org/pkg/go/types/" target="_blank">go/types</a>を使用してコードの文字列から戻り値の型を調べる方法</li>
+</ul>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="テンプレートの作成" duration="4">
+        <p>これから作るツールは、構造体から次のようなコードを生成するものです。</p>
+<pre><code>package a
+
+import (
+        &#34;encoding/json&#34;
+        &#34;time&#34;
+)
+
+func (v *Resource) MarshalJSON() ([]byte, error) {
+        type Alias Resource
+        return json.Marshal(&amp;struct {
+                *Alias
+                AliasTimestamp int64 `json:&#34;timestamp&#34;`
+        }{
+                Alias:          (*Alias)(v),
+                AliasTimestamp: v.Timestamp.Unix(),
+        })
+}
+
+func (v *Resource) UnmarshalJSON(b []byte) error {
+        type Alias Resource
+        aux := &amp;struct {
+                *Alias
+                AliasTimestamp int64 `json:&#34;timestamp&#34;`
+        }{
+                Alias: (*Alias)(v),
+        }
+        if err := json.Unmarshal(b, &amp;aux); err != nil {
+                return err
+        }
+        v.Timestamp = time.Unix(aux.AliasTimestamp, 0)
+        return nil
+}</code></pre>
+<p>型の変換は<code>customjson</code>タグを付けたフィールドに対して行われるように実装します。</p>
+<pre><code>type Resource struct {
+        ID        int64     `json:&#34;id&#34;`
+        Timestamp time.Time `json:&#34;-&#34; customjson:&#34;timestamp=$.Unix();time.Unix($, 0)&#34;`
+}</code></pre>
+<p><code>customjson</code>タグは以下のように、JSON上のフィールド名と各メソッドで呼ばれる任意の式を指定できる形式とします。</p>
+<pre><code>`customjson:&#34;&lt;JSONのフィールド名&gt;=&lt;MarshalJSON用の式&gt;;&lt;UnmarshalJSON用の割り当て&gt;&#34;`</code></pre>
+<p>また、式中では右辺のレシーバに展開するための特殊文字として<code>$</code>が使えるようにします。</p>
+<p>最初のステップとしてコードを生成するためのテンプレートを作成します。以下のデータをパラメータ化し、最初は固定値を利用して生成してみます。</p>
+<table>
+<tr><td colspan="1" rowspan="1"><p>要素</p>
+</td><td colspan="1" rowspan="1"><p>意味</p>
+</td></tr>
+<tr><td colspan="1" rowspan="1"><p><code>Receiver</code></p>
+</td><td colspan="1" rowspan="1"><p>レシーバ名</p>
+</td></tr>
+<tr><td colspan="1" rowspan="1"><p><code>Aliases.Target</code></p>
+</td><td colspan="1" rowspan="1"><p>対象のフィールド名</p>
+</td></tr>
+<tr><td colspan="1" rowspan="1"><p><code>Aliases.Type</code></p>
+</td><td colspan="1" rowspan="1"><p>対象のJSON上の型</p>
+</td></tr>
+<tr><td colspan="1" rowspan="1"><p><code>Aliases.JSONKey</code></p>
+</td><td colspan="1" rowspan="1"><p>対象のJSON上のフィールド名</p>
+</td></tr>
+<tr><td colspan="1" rowspan="1"><p><code>Exprs</code></p>
+</td><td colspan="1" rowspan="1"><p>MarshalJSON用の式</p>
+</td></tr>
+<tr><td colspan="1" rowspan="1"><p><code>Assigns</code></p>
+</td><td colspan="1" rowspan="1"><p>UnmarshalJSON用の割り当て</p>
+</td></tr>
+</table>
+<pre><code>package main
+
+import (
+        &#34;bytes&#34;
+        &#34;fmt&#34;
+        &#34;text/template&#34;
+)
+
+const (
+        pkgName = &#34;a&#34;
+)
+
+// テンプレートに展開するダミー値
+var data = map[string]interface{}{
+        &#34;Receiver&#34;: &#34;Resource&#34;,
+        &#34;Aliases&#34;: []map[string]interface{}{
+                {
+                        &#34;Target&#34;:  &#34;Timestamp&#34;,
+                        &#34;Type&#34;:    &#34;int64&#34;,
+                        &#34;JSONKey&#34;: &#34;timestamp&#34;,
+                },
+        },
+        &#34;Exprs&#34;: []string{
+                &#34;AliasTimestamp: v.Timestamp.Unix(),&#34;,
+        },
+        &#34;Assigns&#34;: []string{
+                &#34;v.Timestamp = time.Unix(aux.AliasTimestamp, 0)&#34;,
+        },
+}
+
+func main() {
+        b := new(bytes.Buffer)
+
+        // パッケージ名の出力
+        fmt.Fprintf(b, &#34;package %s\n\n&#34;, pkgName)
+
+        // テンプレートからコード生成
+        template.Must(template.New(&#34;marshal&#34;).Parse(tmplMarshal)).Execute(b, data)
+        fmt.Fprintf(b, &#34;\n&#34;)
+        template.Must(template.New(&#34;unmarshal&#34;).Parse(tmplUnmarshal)).Execute(b, data)
+
+        // コンソールへ出力
+        fmt.Println(b.String())
+}
+
+// MarshalJSON用のテンプレート
+const tmplMarshal = `func (v *&#123;&#123;.Receiver}}) MarshalJSON() ([]byte, error) {
+        type Alias &#123;&#123;.Receiver}}
+        return json.Marshal(&amp;struct {
+                *Alias
+                &#123;&#123;- range .Aliases }}
+                Alias&#123;&#123;.Target}} &#123;&#123;.Type}} ` + &#34;`json:&#34; + `&#34;&#123;&#123;.JSONKey}}&#34;` + &#34;`&#34; + `
+                &#123;&#123;- end }}
+        }{
+                Alias: (*Alias)(v),
+                &#123;&#123;- range .Exprs }}
+                &#123;&#123;.}}
+                &#123;&#123;- end }}
+        })
+}
+`
+
+// UnmarshalJSON用のテンプレート
+const tmplUnmarshal = `func (v *&#123;&#123;.Receiver}}) UnmarshalJSON(b []byte) error {
+        type Alias &#123;&#123;.Receiver}}
+        aux := &amp;struct {
+                *Alias
+                &#123;&#123;- range .Aliases }}
+                Alias&#123;&#123;.Target}} &#123;&#123;.Type}} ` + &#34;`json:&#34; + `&#34;&#123;&#123;.JSONKey}}&#34;` + &#34;`&#34; + `
+                &#123;&#123;- end }}
+        }{
+                Alias: (*Alias)(v),
+        }
+        if err := json.Unmarshal(b, &amp;aux); err != nil {
+                return err
+        }
+        &#123;&#123;- range .Assigns }}
+        &#123;&#123;.}}
+        &#123;&#123;- end }}
+        return nil
+}
+`</code></pre>
+<p><a href="https://play.golang.org/p/gd0eAkk8TiR" target="_blank">Go Playground</a>でコードを見る。</p>
+<p>これで目的に近いコードが生成されますが、よく見ると<code>encoding/json</code>や<code>time</code>パッケージがインポートされていません。また、コードも整形されていない状態となっています。</p>
+<pre>package a
+
+func (v *Resource) MarshalJSON() ([]byte, error) {
+        type Alias Resource
+        return json.Marshal(&amp;struct {
+                *Alias
+                AliasTimestamp int64 `json:&#34;timestamp&#34;`
+        }{
+                Alias: (*Alias)(v),
+                AliasTimestamp: v.Timestamp.Unix(),
+        })
+}
+
+func (v *Resource) UnmarshalJSON(b []byte) error {
+        type Alias Resource
+        aux := &amp;struct {
+                *Alias
+                AliasTimestamp int64 `json:&#34;timestamp&#34;`
+        }{
+                Alias: (*Alias)(v),
+        }
+        if err := json.Unmarshal(b, &amp;aux); err != nil {
+                return err
+        }
+        v.Timestamp = time.Unix(aux.AliasTimestamp, 0)
+        return nil
+}</pre>
+<p>あらかじめ元のコードから必要となるパッケージを収集しておくことも不可能ではありませんが、より簡単なのは<code>goimports</code>を利用することです。</p>
+<p><code>goimports</code>はコマンドラインツールとして利用するだけでなく、<a href="https://godoc.org/golang.org/x/tools/imports" target="_blank">golang.org/x/tools/imports</a>として、プログラム内からAPIとして利用することも可能です。</p>
+<p>今回使用するのは<a href="https://godoc.org/golang.org/x/tools/imports#Process" target="_blank">Process</a>関数です。コンソールへの出力処理として記述していた<code>fmt.Println(b.String())</code>を次のように変更します。</p>
+<pre><code>// goimportsを実行
+out, err := imports.Process(&#34;ファイル名&#34;, b.Bytes(), nil)
+if err != nil {
+        panic(err)
+}
+fmt.Println(string(out))</code></pre>
+<p><a href="https://play.golang.org/p/ojn8hXKYAHy" target="_blank">Go Playground</a>でコードを見る。</p>
+<p>これで<code>encoding/json</code>と<code>time</code>がインポートされ、コードも整形されるようになりました。</p>
+<pre>import (
+        &#34;encoding/json&#34;
+        &#34;time&#34;
+)
+
+func (v *Resource) MarshalJSON() ([]byte, error) {
+        type Alias Resource
+        return json.Marshal(&amp;struct {
+                *Alias
+                AliasTimestamp int64 `json:&#34;timestamp&#34;`
+        }{
+                Alias:          (*Alias)(v),
+                AliasTimestamp: v.Timestamp.Unix(),
+        })
+}
+
+func (v *Resource) UnmarshalJSON(b []byte) error {
+        type Alias Resource
+        aux := &amp;struct {
+                *Alias
+                AliasTimestamp int64 `json:&#34;timestamp&#34;`
+        }{
+                Alias: (*Alias)(v),
+        }
+        if err := json.Unmarshal(b, &amp;aux); err != nil {
+                return err
+        }
+        v.Timestamp = time.Unix(aux.AliasTimestamp, 0)
+        return nil
+}</pre>
+<p>あとは固定値を設定していたパラメータについて、静的解析で取得するようにすればOKです。</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="レシーバ型名の取得" duration="1">
+        <p>元にする構造体は以下のコードに定義された<code>Resource</code>です。</p>
+<pre><code>//
+// 静的解析対象のコード
+//
+package a
+
+import (
+        &#34;time&#34;
+)
+
+type Resource struct {
+        ID        int64     `json:&#34;id&#34;`
+        Timestamp time.Time `json:&#34;-&#34; customjson:&#34;timestamp=$.Unix();time.Unix($, 0)&#34;`
+}</code></pre>
+<p><a href="https://play.golang.org/p/gMm41M3itsr" target="_blank">Go Playground</a>でコードを見る。</p>
+<p>レシーバの型名である<code>Resource</code>は<a href="https://golang.org/pkg/go/ast/#TypeSpec" target="_blank">TypeSpec</a>の<a href="https://golang.org/pkg/go/ast/#Ident" target="_blank">Name</a>から取得することができます。</p>
+<pre><code>// ASTを解析
+ast.Inspect(file, func(node ast.Node) bool {
+        ts, ok := node.(*ast.TypeSpec)
+        if !ok {
+                return true
+        }
+
+        _, ok = ts.Type.(*ast.StructType)
+        if !ok {
+                return true
+        }
+
+        // Output:
+        // Receiver: Resource
+        fmt.Println(&#34;Receiver:&#34;, ts.Name.Name)
+
+        return true
+})</code></pre>
+<p><a href="https://play.golang.org/p/zS8ikK-6jyj" target="_blank">Go Playground</a>でコードを見る。</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="対象フィールドの取得" duration="3">
+        <p>次に対象となるフィールドを取得します。</p>
+<pre><code>//
+// 【再掲】静的解析対象のコード
+//
+package a
+
+import (
+        &#34;time&#34;
+)
+
+type Resource struct {
+        ID        int64     `json:&#34;id&#34;`
+        Timestamp time.Time `json:&#34;-&#34; customjson:&#34;timestamp=$.Unix();time.Unix($, 0)&#34;`
+}</code></pre>
+<p>今回対象となるフィールドは<a href="https://golang.org/pkg/go/ast/#StructType" target="_blank">StructType</a>から<code>customjson</code>タグが付いているものなので、それを探します。</p>
+<pre><code>// ASTを解析
+ast.Inspect(file, func(node ast.Node) bool {
+        ts, ok := node.(*ast.TypeSpec)
+        if !ok {
+                return true
+        }
+
+        s, ok := ts.Type.(*ast.StructType)
+        if !ok {
+                return true
+        }
+
+        // フィールドの一覧を走査
+        for _, f := range s.Fields.List {
+                if f.Tag == nil {
+                        continue
+                }
+
+                // `customjson`タグが付いていないものは無視
+                customtag := reflect.StructTag(f.Tag.Value).Get(&#34;customjson&#34;)
+                if customtag == &#34;&#34; {
+                        continue
+                }
+
+                // Output:
+                // Field=Timestamp, Tag=&#34;timestamp=$.Unix();time.Unix($, 0)&#34;
+                fmt.Printf(&#34;Field=%s, Tag=%q\n&#34;, f.Names[0].Name, customtag)
+        }
+
+        return true
+})</code></pre>
+<p><a href="https://play.golang.org/p/1WmwouOBZtA" target="_blank">Go Playground</a>でコードを見る。</p>
+<p>こちらを実行すると、以下のように<code>Field</code>と<code>Tag</code>が出力されます。</p>
+<pre><code>Field=Timestamp, Tag=&#34;timestamp=$.Unix();time.Unix($, 0)&#34;</code></pre>
+<p>フィールド名は<code>Field</code>をそのまま利用できますが、JSON上の型とフィールド名については<code>Tag</code>から取得する必要があります。</p>
+<p>タグの形式を再掲します。</p>
+<pre><code>`customjson:&#34;&lt;JSONのフィールド名&gt;=&lt;MarshalJSON用の式&gt;;&lt;UnmarshalJSON用の割り当て&gt;&#34;`</code></pre>
+<p>まずは<code>=</code>と<code>;</code>で<code>Tag</code>を要素ごとに分割します。</p>
+<pre><code>// 処理対象のタグ
+tag := &#34;timestamp=$.Unix();time.Unix($, 0)&#34;
+
+// 「JSON上のフィールド名」とそれ以外に分割
+s := strings.Split(tag, &#34;=&#34;)
+if len(s) != 2 {
+        panic(&#34;invalid tag&#34;)
+}
+
+// 「MarshalJSON用の式」と「UnmarshalJSON用の割り当て」で分割
+lhs := strings.Split(s[1], &#34;;&#34;)
+if len(lhs) != 2 {
+        panic(&#34;invalid tag&#34;)
+}
+
+// Output:
+// JSONKey: timestamp
+// Expr: $.Unix()
+// Assign: time.Unix($, 0)
+fmt.Println(&#34;JSONKey:&#34;, s[0])
+fmt.Println(&#34;Expr:&#34;, lhs[0])
+fmt.Println(&#34;Assign:&#34;, lhs[1])</code></pre>
+<p><a href="https://play.golang.org/p/lT0jGZGNmVt" target="_blank">Go Playground</a>でコードを見る。</p>
+<p><code>JSONKey</code>がJSON上のフィールド名になります。</p>
+<p>型については<code>Expr</code>の戻り値を調べる必要があるため、<a href="https://golang.org/pkg/go/types/#Eval" target="_blank">types.Eval</a>関数でコードを評価 することで取得します。その際にパッケージの情報を渡す必要があるため、<a href="https://golang.org/pkg/go/types/#Config" target="_blank">types.Config</a>の<a href="https://golang.org/pkg/go/types/#Config.Check" target="_blank">Check</a>メソッドで取得しておきます。</p>
+<pre><code>conf := &amp;types.Config{Importer: importer.Default()}
+pkg, err := conf.Check(&#34;任意のパス&#34;, fset, []*ast.File{file}, nil)
+if err != nil {
+        panic(err)
+}</code></pre>
+<p>また、コードの特殊文字<code>$</code>は実際の型に展開した状態で渡す必要があります。ここでは暫定的に文字列をそのまま置換して試してみます。</p>
+<pre><code>// 評価対象の式
+expr := &#34;$.Unix()&#34;
+
+// `$`を`Resource{}.Timestamp`に置換した上で評価（Eval）
+typ, err := types.Eval(fset, pkg, 0, strings.Replace(expr, &#34;$&#34;, &#34;Resource{}.Timestamp&#34;, -1))
+if err != nil {
+        panic(err)
+}
+if typ.Type == nil {
+        panic(&#34;invalid expr&#34;)
+}
+
+// Output:
+// int64
+fmt.Println(typ.Type.String())</code></pre>
+<p><a href="https://play.golang.org/p/wj0MkhPAUMu" target="_blank">Go Playground</a>でコードを見る。(※Go Playground上では動きません)</p>
+<p>これでJSON上の型も取得できました。</p>
+<p>最終的に以下のフィールド定義から表に記載した情報を取得できました。</p>
+<pre><code>Timestamp time.Time `json:&#34;-&#34; customjson:&#34;timestamp=$.Unix();time.Unix($, 0)&#34;`</code></pre>
+<p>表. 構造体のフィールド定義から得られた情報</p>
+<table>
+<tr><td colspan="1" rowspan="1"><p>フィールド名</p>
+</td><td colspan="1" rowspan="1"><p><code>Timestamp</code></p>
+</td></tr>
+<tr><td colspan="1" rowspan="1"><p>MarshalJSON用の式</p>
+</td><td colspan="1" rowspan="1"><p><code>$.Unix()</code></p>
+</td></tr>
+<tr><td colspan="1" rowspan="1"><p>UnmarshalJSON用の割り当て</p>
+</td><td colspan="1" rowspan="1"><p><code>time.Unix($, 0)</code></p>
+</td></tr>
+<tr><td colspan="1" rowspan="1"><p>JSON上の型</p>
+</td><td colspan="1" rowspan="1"><p><code>int64</code></p>
+</td></tr>
+</table>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="MarshalJSON / UnmarshalJSON用のコード生成" duration="1">
+        <p>次に<code>MarshalJSON</code>メソッドと<code>UnmarshalJSON</code>メソッド用のコードを生成します。</p>
+<pre><code>// MarshalJSON用のコード
+AliasTimestamp: v.Timestamp.Unix(),
+
+// UnmarshalJSON用のコード
+v.Timestamp = time.Unix(aux.AliasTimestamp, 0)</code></pre>
+<h2 is-upgraded>MarshalJSON</h2>
+<p><code>MarshalJSON</code>メソッドでは、対象の構造体のレシーバを<code>v</code>として、<code>Alias</code>プレフィックスが付きのフィールドに値を設定します。</p>
+<pre><code>target := &#34;Timestamp&#34; // フィールド名
+lhs := &#34;$.Unix()&#34;     // 式
+
+// Output:
+// AliasTimestamp: v.Timestamp.Unix(),
+fmt.Printf(&#34;Alias%s: %s,&#34;, target, strings.Replace(lhs, &#34;$&#34;, &#34;v.&#34;+target, -1))</code></pre>
+<p><a href="https://play.golang.org/p/-uNtQ34sq1D" target="_blank">Go Playground</a>でコードを見る。</p>
+<h2 is-upgraded>UnmarshalJSON</h2>
+<p><code>UnmarshalJSON</code>メソッドでは、対象の構造体のレシーバを<code>v</code>として、<code>Alias</code>プレフィックスが付きのフィールドから値を設定します。</p>
+<pre><code>target := &#34;Timestamp&#34;    // フィールド名
+lhs := &#34;time.Unix($, 0)&#34; // 式
+
+// Output:
+// v.Timestamp = time.Unix(aux.AliasTimestamp, 0)
+fmt.Printf(&#34;v.%s = %s&#34;, target, strings.Replace(lhs, &#34;$&#34;, &#34;aux.Alias&#34;+target, -1))</code></pre>
+<p><a href="https://play.golang.org/p/N9fjBQUVa7q" target="_blank">Go Playground</a>でコードを見る。</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="コードを完成させる" duration="3">
+        <p>それではここまでに実装したコードを組み合わせ、静的解析の結果をテンプレートに渡してコードを生成してみましょう。</p>
+<p>全体のコードは次のようになります。</p>
+<pre><code>package main
+
+import (
+        &#34;bytes&#34;
+        &#34;fmt&#34;
+        &#34;go/ast&#34;
+        &#34;go/importer&#34;
+        &#34;go/parser&#34;
+        &#34;go/token&#34;
+        &#34;go/types&#34;
+        &#34;reflect&#34;
+        &#34;strings&#34;
+        &#34;text/template&#34;
+
+        &#34;golang.org/x/tools/imports&#34;
+)
+
+func main() {
+        src := new(bytes.Buffer)
+
+        // 静的解析の対象となるコード
+        src.WriteString(&#34;package a\n&#34;)
+        src.WriteString(&#34;\n&#34;)
+        src.WriteString(&#34;import (\n&#34;)
+        src.WriteString(&#34;\t\&#34;time\&#34;\n&#34;)
+        src.WriteString(&#34;)\n&#34;)
+        src.WriteString(&#34;\n&#34;)
+        src.WriteString(&#34;type Resource struct {\n&#34;)
+        src.WriteString(&#34;\tID        int64     `json:\&#34;id\&#34;`\n&#34;)
+        src.WriteString(&#34;\tTimestamp time.Time `json:\&#34;-\&#34; customjson:\&#34;timestamp=$.Unix();time.Unix($, 0)\&#34;`\n&#34;)
+        src.WriteString(&#34;}\n&#34;)
+
+        path := &#34;a&#34;
+        filename := &#34;a.go&#34;
+
+        // ASTの取得
+        fset := token.NewFileSet()
+        file, err := parser.ParseFile(fset, filename, src, parser.ParseComments)
+        if err != nil {
+                panic(err)
+        }
+
+        // パッケージ情報の取得
+        conf := &amp;types.Config{Importer: importer.Default()}
+        pkg, err := conf.Check(path, fset, []*ast.File{file}, nil)
+        if err != nil {
+                panic(err)
+        }
+
+        // 解析結果を保持する変数を用意
+        data := map[string]interface{}{&#34;Receiver&#34;: &#34;&#34;}
+        var aliases []map[string]interface{} // data[&#34;Aliases&#34;]用
+        var exprs []string                   // data[&#34;Exprs&#34;]用
+        var assigns []string                 // data[&#34;Assigns&#34;]用
+
+        // 解析の実行
+        ast.Inspect(file, func(node ast.Node) bool {
+                ts, ok := node.(*ast.TypeSpec)
+                if !ok {
+                        return true
+                }
+
+                s, ok := ts.Type.(*ast.StructType)
+                if !ok {
+                        return true
+                }
+                // レシーバ名
+                data[&#34;Receiver&#34;] = ts.Name.Name
+
+                // フィールドを走査
+                for _, f := range s.Fields.List {
+                        if f.Tag == nil {
+                                continue
+                        }
+                        customtag := reflect.StructTag(f.Tag.Value).Get(&#34;customjson&#34;)
+                        if customtag == &#34;&#34; {
+                                continue
+                        }
+
+                        // タグを対象のJSON上のフィールド名(t[0])とコード(t[1])に分解
+                        t := strings.Split(customtag, &#34;=&#34;)
+                        if len(t) != 2 {
+                                panic(&#34;invalid tag&#34;)
+                        }
+
+                        // コードをMarshalJSON用の式とUnmarshalJSON用の割り当てに分解
+                        lhs := strings.Split(t[1], &#34;;&#34;)
+                        if len(lhs) != 2 {
+                                panic(&#34;invalid tag&#34;)
+                        }
+
+                        // 対象のフィールド名
+                        target := f.Names[0].Name
+
+                        // MarshalJSON用の式から対象のJSON上の型を調べる
+                        expr := strings.Replace(lhs[0], &#34;$&#34;, ts.Name.Name+&#34;{}.&#34;+target, -1)
+                        typ, err := types.Eval(fset, pkg, 0, expr)
+                        if err != nil {
+                                panic(err)
+                        }
+                        if typ.Type == nil {
+                                panic(&#34;invalid expr&#34;)
+                        }
+
+                        aliases = append(aliases, map[string]interface{}{
+                                &#34;Target&#34;:  target,
+                                &#34;Type&#34;:    typ.Type.String(),
+                                &#34;JSONKey&#34;: t[0],
+                        })
+
+                        // 特殊文字を展開し、テンプレートに合うように変換
+                        exprs = append(exprs, fmt.Sprintf(&#34;Alias%s: %s,&#34;, target, strings.Replace(lhs[0], &#34;$&#34;, &#34;v.&#34;+target, -1)))
+                        assigns = append(assigns, fmt.Sprintf(&#34;v.%s = %s&#34;, target, strings.Replace(lhs[1], &#34;$&#34;, &#34;aux.Alias&#34;+target, -1)))
+                }
+
+                return true
+        })
+
+        // テンプレートに渡すデータの追加
+        data[&#34;Aliases&#34;] = aliases
+        data[&#34;Exprs&#34;] = exprs
+        data[&#34;Assigns&#34;] = assigns
+
+        // テンプレートからコードを生成
+        b := new(bytes.Buffer)
+        fmt.Fprintf(b, &#34;package %s\n\n&#34;, pkg.Name())
+        template.Must(template.New(&#34;marshal&#34;).Parse(tmplMarshal)).Execute(b, data)
+        fmt.Fprintf(b, &#34;\n&#34;)
+        template.Must(template.New(&#34;unmarshal&#34;).Parse(tmplUnmarshal)).Execute(b, data)
+
+        // コードの整形とインポート文の追加
+        out, err := imports.Process(strings.ToLower(data[&#34;Receiver&#34;].(string))+&#34;_json.go&#34;, b.Bytes(), nil)
+        if err != nil {
+                panic(err)
+        }
+
+        // 出力
+        fmt.Println(string(out))
+}
+
+// MarshalJSON用のテンプレート
+const tmplMarshal = `func (v *&#123;&#123;.Receiver}}) MarshalJSON() ([]byte, error) {
+        type Alias &#123;&#123;.Receiver}}
+        return json.Marshal(&amp;struct {
+                *Alias
+                &#123;&#123;- range .Aliases }}
+                Alias&#123;&#123;.Target}} &#123;&#123;.Type}} ` + &#34;`json:&#34; + `&#34;&#123;&#123;.JSONKey}}&#34;` + &#34;`&#34; + `
+                &#123;&#123;- end }}
+        }{
+                Alias: (*Alias)(v),
+                &#123;&#123;- range .Exprs }}
+                &#123;&#123;.}}
+                &#123;&#123;- end }}
+        })
+}
+`
+
+// UnmarshalJSON用のテンプレート
+const tmplUnmarshal = `func (v *&#123;&#123;.Receiver}}) UnmarshalJSON(b []byte) error {
+        type Alias &#123;&#123;.Receiver}}
+        aux := &amp;struct {
+                *Alias
+                &#123;&#123;- range .Aliases }}
+                Alias&#123;&#123;.Target}} &#123;&#123;.Type}} ` + &#34;`json:&#34; + `&#34;&#123;&#123;.JSONKey}}&#34;` + &#34;`&#34; + `
+                &#123;&#123;- end }}
+        }{
+                Alias: (*Alias)(v),
+        }
+        if err := json.Unmarshal(b, &amp;aux); err != nil {
+                return err
+        }
+        &#123;&#123;- range .Assigns }}
+        &#123;&#123;.}}
+        &#123;&#123;- end }}
+        return nil
+}
+`</code></pre>
+<p><a href="https://play.golang.org/p/SJXzFpYw93Z" target="_blank">Go Playground</a>でコードの全体を見る。(※Go Playground上では動きません)</p>
+<aside class="special"><p><strong>注</strong>: 上記のコードはエラーハンドリングを省略し、全て<code>panic</code>としています。実際のツールを作成する際にはきちんと実装するようにしてください。</p>
+</aside>
+<p>実行すると以下の出力結果が得られます。</p>
+<pre>package a
+
+import (
+        &#34;encoding/json&#34;
+        &#34;time&#34;
+)
+
+func (v *Resource) MarshalJSON() ([]byte, error) {
+        type Alias Resource
+        return json.Marshal(&amp;struct {
+                *Alias
+                AliasTimestamp int64 `json:&#34;timestamp&#34;`
+        }{
+                Alias:          (*Alias)(v),
+                AliasTimestamp: v.Timestamp.Unix(),
+        })
+}
+
+func (v *Resource) UnmarshalJSON(b []byte) error {
+        type Alias Resource
+        aux := &amp;struct {
+                *Alias
+                AliasTimestamp int64 `json:&#34;timestamp&#34;`
+        }{
+                Alias: (*Alias)(v),
+        }
+        if err := json.Unmarshal(b, &amp;aux); err != nil {
+                return err
+        }
+        v.Timestamp = time.Unix(aux.AliasTimestamp, 0)
+        return nil
+}
+</pre>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="おめでとうございます!" duration="1">
+        <p>静的解析をしてコードを生成する方法について学びました！</p>
+<p>本コードラボの元になったツールは<a href="https://golangtokyo.connpass.com/event/122263/" target="_blank">golang.tokyo #22</a>で作られた<a href="https://github.com/daisuzu/encjsongen" target="_blank">こちら</a>です。</p>
+
+
+      </google-codelab-step>
+    
+  </google-codelab>
+
+  <script src="https://storage.googleapis.com/codelab-elements/native-shim.js"></script>
+  <script src="https://storage.googleapis.com/codelab-elements/custom-elements.min.js"></script>
+  <script src="https://storage.googleapis.com/codelab-elements/prettify.js"></script>
+  <script src="https://storage.googleapis.com/codelab-elements/codelab-elements.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,821 @@
+
+<!doctype html>
+
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, minimum-scale=1.0, initial-scale=1.0, user-scalable=yes">
+  <meta name="theme-color" content="#4F7DC9">
+  <meta charset="UTF-8">
+  <title>TDD（テスト駆動開発）で始めるGoのテスト</title>
+  <link rel="stylesheet" href="//fonts.googleapis.com/css?family=Source+Code+Pro:400|Roboto:400,300,400italic,500,700|Roboto+Mono">
+  <link rel="stylesheet" href="//fonts.googleapis.com/icon?family=Material+Icons">
+  <link rel="stylesheet" href="https://storage.googleapis.com/codelab-elements/codelab-elements.css">
+  <style>
+    .success {
+      color: #1e8e3e;
+    }
+    .error {
+      color: red;
+    }
+    #codelab-nav-buttons {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <google-codelab-analytics gaid="UA-101877661-28"></google-codelab-analytics>
+  <google-codelab codelab-gaid=""
+                  id="tdd-go"
+                  title="TDD（テスト駆動開発）で始めるGoのテスト"
+                  environment="web"
+                  feedback-link="https://dena.github.io/codelabs/">
+    
+      <google-codelab-step label="はじめに" duration="1">
+        <p>このコードラボでは、テスト駆動開発（TDD）という開発手法を使って<a href="https://ja.wikipedia.org/wiki/Fizz_Buzz" target="_blank">FizzBuzz</a>を実装します（FizzBuzzをご存じない方はリンク先でご確認ください）。</p>
+<p>テスト駆動開発（TDD）によるソフトウェア開発の流れを学びつつ、Goのテストコードの書き方を学ぶことができます！</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="サンプルコードのダウンロード" duration="2">
+        <p>このコードラボでは1からソースを作成していきますが、事前に雛形・ディレクトリ構成が用意された以下のサンプルコードを<code>git clone</code>または、ZIPでダウンロード・解凍しておくとスムーズに開始できます。</p>
+<pre>$ git clone https://github.com/DeNA/codelabs.git</pre>
+<p>このコードラボのサンプルコードは<code>sources/tdd-go</code>以下に格納されています。</p>
+<pre>$ cd codelabs/sources/tdd-go
+$ ls
+1_fizzbuzz_start 2_fizzbuzz_answer</pre>
+<p>ディレクトリ構造は以下のようになっており、<code>1_fizzbuzz_start</code>がこのコードラボを始める際の雛形になっています。<code>2_fizzbuzz_answer</code>はこのコードラボを終えたときの最終形のコードが格納されています。</p>
+<pre>$ tree .
+.
+├── 1_fizzbuzz_start
+│   └── gopath
+│       └── src
+│           └── fizzbuzz
+│               ├── fizzbuzz.go
+│               └── fizzbuzz_test.go
+└── 2_fizzbuzz_answer
+    └── gopath
+        └── src
+            └── fizzbuzz
+                ├── fizzbuzz.go
+                └── fizzbuzz_test.go</pre>
+<p>最後に<code>GOPATH</code>を設定し、このコードラボを開始できる状態にしましょう。</p>
+<pre>$ cd 1_fizzbuzz_start/gopath
+$ export GOPATH=`pwd`</pre>
+<aside class="warning"><p>環境変数はそのシェル内のみで有効なので、VSCode上のターミナルで進める場合はそこで環境変数<code>GOPATH</code>を設定しましょう。</p>
+</aside>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="TDD（テスト駆動開発）とは" duration="2">
+        <p>テスト駆動開発（TDD：Test Driven Development）とは、最初にテストを書き、そのテストがパスする最低限の実装をし、コードを洗練させる（リファクタリング）、というサイクルを繰り返しながらソフトウェアを開発する手法です。</p>
+<aside class="special"><p>「テスト」という単語が含まれていますが、末尾に「開発（Development）」という単語があるように、ウォーターフォールなどと同様に開発手法のひとつです。</p>
+</aside>
+<h2 is-upgraded>Red / Green / Refactor</h2>
+<p>このサイクルは「Red」「Green」「Refactor」という単語で語られます。</p>
+<table>
+<tr><td colspan="1" rowspan="1"><p>Red</p>
+</td><td colspan="1" rowspan="1"><p>失敗するテストを書く</p>
+</td></tr>
+<tr><td colspan="1" rowspan="1"><p>Green</p>
+</td><td colspan="1" rowspan="1"><p>テストがパスするコードを書く</p>
+</td></tr>
+<tr><td colspan="1" rowspan="1"><p>Refactor</p>
+</td><td colspan="1" rowspan="1"><p>コードを洗練させる（リファクタリング）</p>
+</td></tr>
+</table>
+<p>TDDではこの Red → Green → Refactor というサイクルをテンポよく繰り返しながら進めていきます。</p>
+<h2 is-upgraded>メリット</h2>
+<p>TDDのメリットとして以下のようなものが挙げられます。</p>
+<ul>
+<li>最初にテストを書くことで、<strong>APIの利用者の目線に立って</strong>インターフェースを考えられる。</li>
+<li>最初にテストを書くことで、<strong>テストしやすい</strong>インターフェースになる。</li>
+<li>リファクタリングにより、<strong>コードがきれいな状態</strong>を保てる。</li>
+<li>最初から過度に抽象化することなく、<strong>シンプルな状態</strong>を保てる。</li>
+</ul>
+<aside class="warning"><p>多くの開発手法・ツールと同様に、万能の開発手法（銀の弾丸）ではないことに注意しましょう！</p>
+</aside>
+<p>説明はこれくらいにして、実際に手を動かしながらTDDを体験してみましょう！</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="やることを洗い出す" duration="1">
+        <p>最初にFizzBuzzで実装すべきことを洗い出しましょう。</p>
+<ul>
+<li>数字を渡したときにその数字の文字列を返す（例：1 → &#34;1&#34;、2 → &#34;2&#34;）</li>
+<li>3で割り切れるときは<code>&#34;Fizz&#34;</code>を返す</li>
+<li>5で割り切れるときは<code>&#34;Buzz&#34;</code>を返す</li>
+<li>3と5の両方で割り切れる場合に<code>&#34;FizzBuzz&#34;</code>を返す</li>
+</ul>
+<p>このように最初に『やること』をリストアップするのはTDDでよく行われます。そして、一度にすべてを行おうとせず一つずつ消化をしていきます。</p>
+<p>TDDは短時間で Red → Green → Refactor のサイクルを繰り返すため、最終的に何をやるのか忘れてしまいがちです。それを防ぐためにも最初にやることをリストアップするのは良い習慣と言えるでしょう。</p>
+<p>このコードラボでは上から順番に実装を進めていきます。</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="テストの雛形を作成する" duration="3">
+        <p>まずはテストコードの雛形として<code>fizzbuzz_test.go</code>を作成します。</p>
+<pre><code>package fizzbuzz_test
+
+import (
+        &#34;testing&#34;
+)
+
+func TestFizzBuzz(t *testing.T) {
+}</code></pre>
+<h2 is-upgraded>ファイル名のルール</h2>
+<p>Go言語ではファイル名の末尾に<code>_test</code>をつけたものがテストコードとして認識されます。ここではテスト対象のファイル名を<code>fizzbuzz.go</code>にするつもりで<code>fizzbuzz_test.go</code>というファイル名にしました。</p>
+<aside class="special"><p>この命名ルールに従っておくことで、通常のビルド時にはテスト用のソースコードは自動的にバイナリから除外されます。</p>
+</aside>
+<p>パッケージ名も同様に末尾に<code>_test</code>をつけています。Go言語では、他のパッケージから利用される想定の関数に対するテストでは、このようにすることで別パッケージとして扱うことができます。</p>
+<h2 is-upgraded>testingパッケージ</h2>
+<p>Go言語では標準パッケージに<code>testing</code>というテスト用のパッケージが含まれています。</p>
+<p><code>TestFizzBuzz</code>という関数を作成しましたが、これがテスト用の関数になります。Go言語では次のルールにあてはまるものがテスト用の関数として認識されます。</p>
+<ul>
+<li><code>Test</code>という単語から始まる（先頭は大文字である必要がある）</li>
+<li>引数として<code>*testing.T</code>を受け取る</li>
+</ul>
+<p>まだ関数の中身はありませんが一度テストを実行してみましょう。<code>fizzbuzz</code>パッケージのディレクトリに移動し、ターミナルから<code>go test</code>コマンドでテストを実行できます。</p>
+<pre>$ cd src/fizzbuzz 
+$ go test -v
+=== RUN   TestFizzBuzz
+--- PASS: TestFizzBuzz (0.00s)
+PASS</pre>
+<p>うまく実行できれば最後に<code>PASS</code>という単語が出力されます。<code>-v</code>オプションは必須ではありませんが、これを付けることでどのテストが実行されたか分かるようになります。</p>
+<p>これでテストを書いて実行できる環境が整いました。次のステップから実際にTDDで実装を進めていきます！</p>
+<aside class="special"><p><a href="https://play.golang.org/p/j4NeEiYWul4" target="_blank">The Go Playground</a>でもテストを実行することができます。ただしパッケージ名はmainである必要があります。</p>
+</aside>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Red：失敗するテストを書く" duration="2">
+        <p>それではTDDの最初のステップである<strong>『失敗するテストを書く』</strong>ところから始めましょう。</p>
+<p>ここでのポイントは<strong>自分が欲しいインターフェースを考える</strong>ことです。今回は<code>int</code>を渡して<code>string</code>を返すインターフェースが欲しいと考え、関数名はシンプルに<code>Fizzbuzz</code>としてみました。</p>
+<pre><code>// fizzbuzz_test.go
+
+package fizzbuzz_test
+
+import (
+        &#34;testing&#34;
+        &#34;fizzbuzz&#34; // インポートを追加
+)
+
+func TestFizzBuzz(t *testing.T) {
+        got := fizzbuzz.FizzBuzz(1)
+        if got != &#34;1&#34; {
+                t.Errorf(`FizzBuzz(1) is %q`, got)
+        }
+}</code></pre>
+<p>ここでは関数の呼び出し結果を変数<code>got</code>に格納し、それが期待値である<code>&#34;1&#34;</code>と一致しなかった場合にテストを失敗させるようにしています。</p>
+<p>このようにGo言語ではユニットテストにおいて幅広く利用されている<a href="https://ja.wikipedia.org/wiki/XUnit" target="_blank">xUnitフレームワーク</a>とは異なりアサーション関数は用意されていません。そのかわりに<strong>期待しない結果</strong>が得られた場合に、テストが失敗したことを記録する関数（ここでは<code>testingパッ</code>ケージのT.Errorf関数）を呼びます。</p>
+<aside class="special"><p>このコードラボでは全体を通して<code>T.Errorf</code>関数のみを利用しますが、任意の変数を渡す<code>T.Error</code>関数や、テストを中断させる<code>T.Fatal</code>関数なども用意されています。</p>
+<p>詳しくは<a href="https://golang.org/pkg/testing/" target="_blank">testingパッケージ</a>を見てみましょう。</p>
+</aside>
+<p>さて<code>FizzBuzz</code>という関数は作成していないので現状ではコンパイルは通りません。テストを実行してそれを確認してみましょう。</p>
+<pre>$ go test -v
+./fizzbuzz_test.go:8:7: undefined: fizzbuzz</pre>
+<p>まずはこれを修正することを<strong>だけ</strong>を考えて、プロダクトコードを実装していきます。<code>fizzbuzz.go</code>というファイル名でソースを作成し、<code>FizzBuzz</code>関数の雛形を実装します。</p>
+<pre><code>// fizzbuzz.go
+
+func FizzBuzz(n int) string {
+        return &#34;&#34;
+}</code></pre>
+<p>中身の実装は空文字列を返すだけのダミー実装ですが問題ありません。今は<strong>コンパイルを通すことが目的</strong>だからです。</p>
+<p>この状態でテストを実行すると次のようにテストが失敗することが確認できます。</p>
+<pre>$ go test -v
+=== RUN   TestFizzBuzz
+--- FAIL: TestFizzBuzz (0.00s)
+    fizzbuzz_test.go:11: FizzBuzz(1) is &#34;&#34; # Errorf関数による出力
+FAIL
+exit status 1
+FAIL    github.dena.jp/swet/go-codelabs/tdd/fizzbuzz    0.018s</pre>
+<p><code>FizzBuzz(1) is &#34;&#34;</code>という出力がされていますが、これは<code>T.Errorf</code>関数に渡した引数によるものです。このように『テストが失敗したときの正確な状況』を把握できるようにするため適切な値を設定することが大切です。</p>
+<aside class="warning"><p>面倒だからといって<code>T.Errorf</code>関数に空文字列などを設定すると、テストが失敗した時にその原因がわからなくなってしまうので注意しましょう。</p>
+</aside>
+<p>これで最初の<strong>『失敗するテストを書く（Red）』</strong>が出来ました！</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Green：テストがパスする最小限のコードを書く" duration="1">
+        <p>次のステップは<strong>『テストがパスする最小限のコードを書く』</strong>です。</p>
+<p>今回のテストをパスさせる最小限の実装は何でしょうか。それは文字列<code>&#34;1&#34;</code>を返すことです。</p>
+<pre><code>// fizzbuzz.go
+
+func FizzBuzz(n int) string {
+        return &#34;1&#34; // &#34;1&#34;を返すように修正
+}</code></pre>
+<p>この状態でテストを実行すると、確かにテストがパスすることがわかります。</p>
+<pre>$ go test -v
+=== RUN   TestFizzBuzz
+--- PASS: TestFizzBuzz (0.00s)
+PASS</pre>
+<p>このようにテストがパスするように値をハードコーディングすることをTDDでは<strong>Fake It（仮実装）</strong>と呼びます。TDDではこのように<strong>確実なことを少しずつ進める</strong>ことで、<strong>自信をたもちながら開発</strong>していく方法がよく使われます。</p>
+<aside class="special"><p>この手順は常に必要なわけではありません。後述しますが<strong>明白な実装</strong>といって最初からあるべきコードを記述する場合もあります。</p>
+</aside>
+<p>これで最初の<strong>『テストがパスする最小限のコードを書く（Green）』</strong>が出来ました！</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Refactor：コードをきれいにする" duration="2">
+        <p>最後のステップは<strong>『コードをきれいにする』</strong>です。</p>
+<p>コードをきれいにする行為は一般的に<strong>リファクタリング</strong>という単語で知られています。このコードラボでも以降はリファクタリングという単語を使用します。</p>
+<h2 is-upgraded>リファクタリング</h2>
+<p>さて現状でリファクタリングすべき箇所はあるでしょうか？</p>
+<p>テストコードをあらためて見てみます。</p>
+<pre><code>// fizzbuzz_test.go
+
+func TestFizzBuzz(t *testing.T) {
+        got := fizzbuzz.FizzBuzz(1)
+        if got != &#34;1&#34; {
+                t.Errorf(`FizzBuzz(1) is %q`, got)
+        }
+}</code></pre>
+<p><code>fizzbuzz</code>パッケージの<code>FizzBuzz</code>関数を呼ぶというインターフェースになっていますが、単語が重複していて冗長な印象を受けます。ここでは<code>fizzbuzz.Convert(1)</code>と呼べるほうが直感的であると感じたのでリファクタリングしてみます。</p>
+<aside class="special"><p>このコードラボでは<code>Convert</code>という関数名を選びましたが、他に適切な名前があると感じるかもしれません。命名に正解はないので、自分が利用者として直感的だと思えるものを選びましょう。</p>
+</aside>
+<pre><code>// fizzbuzz_test.go
+
+func TestConvert(t *testing.T) {
+        got := fizzbuzz.Convert(1)
+        if got != &#34;1&#34; {
+                t.Errorf(`Convert(1) is %q`, got)
+        }
+}</code></pre>
+<p>関数名やエラーメッセージを<code>Convert</code>に変更し、それにあわせてテスト用の関数も名前を変更しました。</p>
+<p>この状態でテストを実行すると「<code>fizzbuzz.Convert</code>が定義されていない」というコンパイルエラーとなり、期待通りにテストが失敗していることが確認できます。</p>
+<pre>./fizzbuzz_test.go:9:9: undefined: fizzbuzz.Convert</pre>
+<p>コンパイルエラーを解消するために、プロダクトコードの方も変更します。</p>
+<pre><code>// fizzbuzz.go
+
+func Convert(n int) string {
+        return &#34;1&#34;
+}</code></pre>
+<aside class="special"><p>仮に忘れていたとしても、テストを実行することで変更漏れを発見することができます。</p>
+</aside>
+<h2 is-upgraded>テストを実行する</h2>
+<p>コード変更が終わったらテストを実行し、<strong>コードを壊していないこと</strong>を確認しましょう。</p>
+<pre>$ go test -v
+=== RUN   TestFizzBuzz
+--- PASS: TestFizzBuzz (0.00s)
+PASS</pre>
+<p>問題なさそうですね！</p>
+<p>このようにテストコードが用意されていることで、自信を持ってリファクタリングできます。</p>
+<h2 is-upgraded>おめでとうございます！</h2>
+<p>これでTDDのサイクルである <strong>Red / Green / Refactor</strong> を体験できました！</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="三角測量" duration="2">
+        <p>ここまでで数字の<code>1</code>を渡したときに文字列<code>&#34;1&#34;</code>が返されるところまで進められました。しかし、他の数字、例えば<code>2</code>を渡した時にFizzBuzzの仕様どおりに動くのでしょうか？</p>
+<p>ためしにテストコードを追加してみましょう。</p>
+<pre><code>// fizzbuzz_test.go
+
+func TestConvert(t *testing.T) {
+        got := fizzbuzz.Convert(1)
+        if got != &#34;1&#34; {
+                t.Errorf(`Convert(1) is %q`, got)
+        }
+
+        // このテストを追加
+        got = fizzbuzz.Convert(2)
+        if got != &#34;2&#34; {
+                t.Errorf(`Convert(2) is %q`, got)
+        }
+}</code></pre>
+<p>これでテストを実行してみると失敗することがわかります。</p>
+<pre>$ go test -v
+=== RUN   TestConvert
+--- FAIL: TestConvert (0.00s)
+    fizzbuzz_test.go:16: Convert(2) is &#34;1&#34;</pre>
+<p>現状では<code>&#34;1&#34;</code>を固定で返却していたので、テストがパスするように修正してみます。<code>strconv.Itoa</code>関数を利用することで数値から文字列への変換が行えるのでそれを利用します。</p>
+<pre><code>// fizzbuzz.go
+
+import (
+        &#34;strconv&#34;
+)
+
+func Convert(n int) string {
+        return strconv.Itoa(n)
+}</code></pre>
+<p>テストが成功することを確認しましょう。</p>
+<pre>$ go test -v
+=== RUN   TestFizzBuzz
+--- PASS: TestFizzBuzz (0.00s)
+PASS</pre>
+<p>このようにあとから別のデータを追加し、それらのテストがパスするように本来あるべきコードに修正する方法を<strong>三角測量</strong>と呼びます。</p>
+<aside class="special"><p>三角測量はリファクタリングに自信がないときに使える慎重な方法です。リファクタリングが明白で自信があるのであれば、必ずしもこのステップは必要ありません！</p>
+</aside>
+<p>これで最初のTODOが消化できました！</p>
+<ul>
+<li>✓ 数字を渡したときにその数字の文字列を返す（例：1 → &#34;1&#34;、2 → &#34;2&#34;）</li>
+<li>□ 3で割り切れるときは<code>&#34;Fizz&#34;</code>を返す</li>
+<li>□ 5で割り切れるときは<code>&#34;Buzz&#34;</code>を返す</li>
+<li>□ 3と5の両方で割り切れる場合に<code>&#34;FizzBuzz&#34;</code>を返す</li>
+</ul>
+<aside class="special"><p>エディタ上でテストコードと実装コードを行き来するのに疲れましたか？エディタの分割機能を利用して、左側にテストコード、右側にプロダクトコードを配置すると便利です。</p>
+</aside>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="残りのTODOを消化する" duration="14">
+        <p>残りのTODOも順番に消化していきましょう。</p>
+<ul>
+<li>✓ 数字を渡したときにその数字の文字列を返す（例：1 → &#34;1&#34;、2 → &#34;2&#34;）</li>
+<li>□ 3で割り切れるときは<code>&#34;Fizz&#34;</code>を返す</li>
+<li>□ 5で割り切れるときは<code>&#34;Buzz&#34;</code>を返す</li>
+<li>□ 3と5の両方で割り切れる場合に<code>&#34;FizzBuzz&#34;</code>を返す</li>
+</ul>
+<h2 is-upgraded>3で割り切れるときは&#34;Fizz&#34;を返す</h2>
+<p><code>3</code>で割り切れるときは<code>&#34;Fizz&#34;</code>という文字列を返す実装を進めていきましょう。</p>
+<h3 is-upgraded>Red</h3>
+<p>まずはテストコードを追加します。</p>
+<pre><code>// fizzbuzz_test.go
+
+func TestConvert(t *testing.T) {
+        got := fizzbuzz.Convert(1)
+        if got != &#34;1&#34; {
+                t.Errorf(`Convert(1) is %q`, got)
+        }
+
+        got = fizzbuzz.Convert(2)
+        if got != &#34;2&#34; {
+                t.Errorf(`Convert(2) is %q`, got)
+        }
+
+        // このテストを追加
+        got = fizzbuzz.Convert(3)
+        if got != &#34;Fizz&#34; {
+                t.Errorf(`Convert(3) is %q`, got)
+        }
+}</code></pre>
+<p>この状態でテストを実行すると失敗するはずです。確認してみましょう。</p>
+<pre>$ go test -v
+=== RUN   TestConvert
+--- FAIL: TestConvert (0.00s)
+    fizzbuzz_test.go:16: Convert(3) is &#34;3&#34;</pre>
+<p>このようにあえて失敗させるのは<strong>自分が書いたテストコードが正しいことを確認する</strong>という意味があります。</p>
+<p>TDDによる実装を始める前にテストの雛形だけ用意してテストを実行した時、テストが成功したのを覚えているでしょうか？これはテストが成功したとしても、正しくテストできているという保証はないことを意味します。</p>
+<p>テストがパスした時に「ちゃんとテスト出来ているのだろうか？」という不安に陥らないように、<strong>テストが期待どおり失敗する</strong>ことを確認するのです。</p>
+<h3 is-upgraded>Green</h3>
+<p>テストがパスするように実装していきます。</p>
+<pre><code>// fizzbuzz.go
+
+func Convert(n int) string {
+        if n%3 == 0 {
+                return &#34;Fizz&#34;
+        }
+        return strconv.Itoa(n)
+}</code></pre>
+<p>前回は<strong>仮実装（Fake It）</strong>を利用して固定値を返すようにしましたが、ここでは自信があったので最初から本来のロジックを実装しました。このように<strong>正解が明らかで不安がないと自分が感じる</strong>場合に最初から実装することを<strong>明白な実装</strong>と呼びます。</p>
+<aside class="special"><p>「自信」や「不安」といった単語が出てきましたが、TDDではこのように<strong>実装時の感情</strong>というものをとても大切にします。不安を感じた際にはそれを無視せず、その不安を取り除きつつ実装を進めることで<strong>自信をたもちつつ</strong>実装を進めていきます。</p>
+<p>その時に実装しているあなたに自信があれば、今回のように<strong>「明白な実装」</strong>をして構いませんし、不安があれば<strong>「仮実装（Fake It）」</strong>と<strong>「三角測量」</strong>を組み合わせて、一歩ずつ完成まで進めても構いません。</p>
+</aside>
+<p>その自信のとおりに正しく実装できているのでしょうか、テストを実行して確認してみましょう。</p>
+<pre>$ go test -v
+=== RUN   TestConvert
+--- PASS: TestConvert (0.00s)
+PASS</pre>
+<p>問題ないことを確認できたら次に進みましょう。</p>
+<h3 is-upgraded>Refactor</h3>
+<p>この段階でリファクタリングすべき箇所はあるでしょうか？</p>
+<p>テストコードに重複があるのでリファクタリング候補ではありますが、<strong>現状では十分にシンプル</strong>にも感じます。今回はこのままにして次のステップに進むことにします。</p>
+<aside class="warning"><p>リファクタリングはTDDのサイクルに組み込まれている大切なステップですが、必ずしも毎回リファクタリングしなければならないという意味ではありません。</p>
+<p>しかし、今回のように「リファクタリングすべき箇所はないか？」と考えるのは忘れないようにしましょう。</p>
+</aside>
+<p>これで2つ目のTODOが消化できました。</p>
+<ul>
+<li>✓ 数字を渡したときにその数字の文字列を返す（例：1 → &#34;1&#34;、2 → &#34;2&#34;）</li>
+<li>✓ 3で割り切れるときは<code>&#34;Fizz&#34;</code>を返す</li>
+<li>□ 5で割り切れるときは<code>&#34;Buzz&#34;</code>を返す</li>
+<li>□ 3と5の両方で割り切れる場合に<code>&#34;FizzBuzz&#34;</code>を返す</li>
+</ul>
+<h2 is-upgraded>5で割り切れるときは&#34;Buzz&#34;を返す</h2>
+<p>次は<code>5</code>で割り切れるときは<code>&#34;Buzz&#34;</code>という文字列を返す実装です。</p>
+<h3 is-upgraded>Red</h3>
+<p>これまで同様に失敗するテストコードを追加します。</p>
+<pre><code>// fizzbuzz_test.go
+
+func TestConvert(t *testing.T) {
+        got := fizzbuzz.Convert(1)
+        if got != &#34;1&#34; {
+                t.Errorf(`Convert(1) is %q`, got)
+        }
+
+        got = fizzbuzz.Convert(2)
+        if got != &#34;2&#34; {
+                t.Errorf(`Convert(2) is %q`, got)
+        }
+
+        got = fizzbuzz.Convert(3)
+        if got != &#34;Fizz&#34; {
+                t.Errorf(`Convert(3) is %q`, got)
+        }
+
+        // このテストを追加
+        got = fizzbuzz.Convert(5)
+        if got != &#34;Buzz&#34; {
+                t.Errorf(`Convert(5) is %q`, got)
+        }
+}</code></pre>
+<p>テストが失敗することを確認できたら進みましょう。</p>
+<h3 is-upgraded>Green</h3>
+<p>テストがパスするコードを実装していきます。</p>
+<p>今回も自信があるので「明白な実装」をしました。</p>
+<pre><code>// fizzbuzz.go
+
+func Convert(n int) string {
+
+        // これを追加
+        if n%5 == 0 {
+                return &#34;Buzz&#34;
+        }
+
+        if n%3 == 0 {
+                return &#34;Fizz&#34;
+        }
+        return strconv.Itoa(n)
+}</code></pre>
+<p>テストがパスすることが確認できたら進みましょう。</p>
+<h3 is-upgraded>Refactor</h3>
+<p>さきほどリファクタリングを見送ったテストコードの重複ですが、このままテストパターンが増えていくことを考えると冗長だと感じます。このタイミングでリファクタリングしてみましょう。</p>
+<p>Go言語では<strong>テーブル駆動テスト</strong>という手法が多く利用されます。事前にテストケース（入力データ、期待値）を用意しておき、それを順番に繰り返しテストするという考え方です。</p>
+<p>現状のテストコードを次のように書き換えてみましょう。</p>
+<pre><code>// fizzbuzz_test.go
+
+func TestConvert(t *testing.T) {
+
+        tests := []struct {
+                n    int    // 入力値
+                want string // 期待値
+        } {
+                { n: 1, want: &#34;1&#34; },
+                { n: 2, want: &#34;2&#34; },
+                { n: 3, want: &#34;Fizz&#34; },
+                { n: 5, want: &#34;Buzz&#34; },
+        }
+
+        for _, tt := range tests {
+                got := fizzbuzz.Convert(tt.n)
+                if got != tt.want {
+                        t.Errorf(`Convert(%v) = %q but want %q`, tt.n, got, tt.want)
+                }
+        }
+}</code></pre>
+<p>テストとして行っていることは変わりませんが、事前にテストパターンが列挙される形式になり見通しがよくなりました。</p>
+<p>ここでもテストを実行して、リファクタリングによって何かを壊していないか確認してみましょう。</p>
+<pre>$ go test -v
+=== RUN   TestConvert
+--- PASS: TestConvert (0.00s)
+PASS
+...</pre>
+<p>テストがパスしたので一安心ですが、<strong>そもそも全パターンのテストが実行されているのか</strong>という不安はないでしょうか。例えば、ループ処理がうまく書けていなかった場合は十分ありえる話です。</p>
+<p>その不安を取り除くために、テストデータを<strong>あえて失敗するはずの値に変更</strong>してテストを実行してみます。期待値である<code>want</code>の先頭に<code>x</code>を追加してテストを実行してみます。</p>
+<pre><code>// fizzbuzz_test.go
+
+func TestConvert(t *testing.T) {
+
+        tests := []struct {
+                n    int
+                want string
+        } {
+                { n: 1, want: &#34;x1&#34; }, // 先頭にxを追加
+                { n: 2, want: &#34;x2&#34; },
+                { n: 3, want: &#34;xFizz&#34; },
+                { n: 5, want: &#34;xBuzz&#34; },
+        }
+
+        for _, tt := range tests {
+                got := fizzbuzz.Convert(tt.n)
+                if got != tt.want {
+                        t.Errorf(`Convert(%v) = %q but want %q`, tt.n, got, tt.want)
+                }
+        }
+}</code></pre>
+<p>すべてのテストケースが実行されていれば、そのようにレポートされるはずです。</p>
+<pre>$ go test -v
+=== RUN   TestConvert
+--- FAIL: TestConvert (0.00s)
+    fizzbuzz_test.go:22: Convert(1) = &#34;1&#34; but want &#34;x1&#34;
+    fizzbuzz_test.go:22: Convert(2) = &#34;2&#34; but want &#34;x2&#34;
+    fizzbuzz_test.go:22: Convert(3) = &#34;Fizz&#34; but want &#34;xFizz&#34;
+    fizzbuzz_test.go:22: Convert(5) = &#34;Buzz&#34; but want &#34;xBuzz&#34;
+FAIL</pre>
+<p>期待どおり4つのテストすべてが失敗しています！</p>
+<p>このように<strong>不安な部分があればひとつずつ確認して進む</strong>というのもTDDでは大切とされています。今回あえてテストを失敗させましたがこれはTDDサイクルにおけるRed<strong>ではなく</strong>、不安を取り除くために自発的におこなったものです。</p>
+<p>これで不安を取り除けたので、テストデータをもとに戻して最後の実装に進みます。</p>
+<ul>
+<li>✓ 数字を渡したときにその数字の文字列を返す（例：1 → &#34;1&#34;、2 → &#34;2&#34;）</li>
+<li>✓ 3で割り切れるときは<code>&#34;Fizz&#34;</code>を返す</li>
+<li>✓ 5で割り切れるときは<code>&#34;Buzz&#34;</code>を返す</li>
+<li>□ 3と5の両方で割り切れる場合に<code>&#34;FizzBuzz&#34;</code>を返す</li>
+</ul>
+<h2 is-upgraded>3と5の両方で割り切れる場合に&#34;FizzBuzz&#34;を返す</h2>
+<p>最後に<code>3</code>の<code>5</code>の両方で割り切れるときは<code>&#34;FizzBuzz&#34;</code>という文字列を返す実装です。</p>
+<h3 is-upgraded>Red</h3>
+<p>いつもどおり失敗するテストの追加から始めます。</p>
+<p>さきほどのリファクタリングによりテストの追加はとても簡単です。</p>
+<pre><code>// fizzbuzz_test.go
+
+func TestConvert(t *testing.T) {
+
+        tests := []struct {
+                n    int
+                want string
+        } {
+                { n: 1, want: &#34;1&#34; },
+                { n: 2, want: &#34;2&#34; },
+                { n: 3, want: &#34;Fizz&#34; },
+                { n: 5, want: &#34;Buzz&#34; },
+                { n: 15, want: &#34;FizzBuzz&#34; },
+        }
+
+        for _, tt := range tests {
+                got := fizzbuzz.Convert(tt.n)
+                if got != tt.want {
+                        t.Errorf(`Convert(%v) = %q but want %q`, tt.n, got, tt.want)
+                }
+        }
+}</code></pre>
+<p>テストが失敗することを確認できたら次に進みます。</p>
+<h3 is-upgraded>Green</h3>
+<p>実装を追加してテストがパスすることを確認します。</p>
+<pre><code>// fizzbuzz.go
+
+func Convert(n int) string {
+        if n%3 == 0 &amp;&amp; n%5 == 0 {
+                return &#34;FizzBuzz&#34;
+        }
+        if n%5 == 0 {
+                return &#34;Buzz&#34;
+        }
+        if n%3 == 0 {
+                return &#34;Fizz&#34;
+        }
+        return strconv.Itoa(n)
+}</code></pre>
+<p>そろそろこの<strong>リズム</strong>にも慣れてきた頃ではないでしょうか？</p>
+<h3 is-upgraded>Refactor</h3>
+<p>このタイミングでリファクタリングすべき箇所はあるでしょうか？</p>
+<p>実装側のコードを見てみると<code>if</code>の羅列になっているので、Go言語の<code>switch</code>文を利用するとスッキリかけそうな気がします。やってみましょう。</p>
+<pre><code>// fizzbuzz.go
+
+func Convert(n int) string {
+        switch {
+        case n%3 == 0 &amp;&amp; n%5 == 0:
+                return &#34;FizzBuzz&#34;
+        case n%5 == 0:
+                return &#34;Buzz&#34;
+        case n%3 == 0:
+                return &#34;Fizz&#34;
+        default:
+                return strconv.Itoa(n)
+        }
+}</code></pre>
+<p>テストを実行してリファクタリングが成功していることを確認しましょう。</p>
+<pre>$ go test -v
+=== RUN   TestConvert
+--- PASS: TestConvert (0.00s)
+PASS</pre>
+<p>問題なさそうです。</p>
+<p>ところで最初の条件文である<code>n%3 == 0 &amp;&amp; n%5 == 0</code>ですが、<code>3</code>と<code>5</code>の両方で割り切れるということは<code>15</code>で割り切れることと同義です。ここもあわせてリファクタリングしましょう。</p>
+<pre><code>// fizzbuzz.go
+
+func Convert(n int) string {
+        switch {
+        case n%15 == 0: // ここを変更
+                return &#34;FizzBuzz&#34;
+        case n%5 == 0:
+                return &#34;Buzz&#34;
+        case n%3 == 0:
+                return &#34;Fizz&#34;
+        default:
+                return strconv.Itoa(n)
+        }
+}</code></pre>
+<p>簡単な変更ですが、念のためテストを実行して壊していないことを確認しましょう。</p>
+<h2 is-upgraded>おめでとうございます！</h2>
+<p>これですべてのタスクを消化し、FizzBuzzの実装を終えることができました！</p>
+<ul>
+<li>✓ 数字を渡したときにその数字の文字列を返す（例：1 → &#34;1&#34;、2 → &#34;2&#34;）</li>
+<li>✓ 3で割り切れるときは<code>&#34;Fizz&#34;</code>を返す</li>
+<li>✓ 5で割り切れるときは<code>&#34;Buzz&#34;</code>を返す</li>
+<li>✓ 3と5の両方で割り切れる場合に<code>&#34;FizzBuzz&#34;</code>を返す</li>
+</ul>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="不安なテストパターンを追加する" duration="2">
+        <p>ところで現状は<code>1</code>、<code>2</code>、<code>3</code>、<code>5</code>、<code>15</code>の計5つのパターンしかテストしていません。これだけのテストパターンで不安はないでしょうか？とくにFizzとBuzzは割り切れる最初の値（<code>3</code>と<code>5</code>）しかテストしていないことがわかります。</p>
+<p>さすがにこれだけでは<strong>不安だと感じる</strong>のでテストパターンを追加していきます。</p>
+<aside class="warning"><p>ここでも不安が原動力になっていることに注意してください。ホワイトボックス的な観点であなたが現状でも十分なテストが出来ていると感じるのであれば、このステップで行うことは不要かもしれません。</p>
+</aside>
+<p>今回は1〜15までを確認できれば十分安心だと思い、次のようにテストパターンを追加してテストを実行し、不安を解消しましょう！</p>
+<pre><code>func TestConvert(t *testing.T) {
+
+        tests := []struct {
+                n        int
+                want string
+        } {
+                { n: 1, want: &#34;1&#34; },
+                { n: 2, want: &#34;2&#34; },
+                { n: 3, want: &#34;Fizz&#34; },
+                { n: 4, want: &#34;4&#34; },
+                { n: 5, want: &#34;Buzz&#34; },
+                { n: 6, want: &#34;Fizz&#34; },
+                { n: 7, want: &#34;7&#34; },
+                { n: 8, want: &#34;8&#34; },
+                { n: 9, want: &#34;Fizz&#34; },
+                { n: 10, want: &#34;Buzz&#34; },
+                { n: 11, want: &#34;11&#34; },
+                { n: 12, want: &#34;Fizz&#34; },
+                { n: 13, want: &#34;13&#34; },
+                { n: 14, want: &#34;14&#34; },
+                { n: 15, want: &#34;FizzBuzz&#34; },
+        }
+...</code></pre>
+<p>不安を解消できたら次に進みましょう！</p>
+<aside class="special"><p>プロダクトコードと同様にテストコードも負債になることがあります。やみくもに増やすのではなく、ときには不要なテストを削ることも考慮しましょう。</p>
+</aside>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="テストコードを改善する" duration="6">
+        <p>現状でも十分なレベルに仕上がっていますが、最後にテストコードを少し改善して終わりにしましょう。</p>
+<h2 is-upgraded>サブテストに分割する</h2>
+<p>今のテストコードでは1〜15の入力パターンに対してテストを行っていますが、コンソール上では1つのテストとして扱われていました。<code>t.Run</code>メソッドを利用するとそれらを個別のテストとして実行することが出来ます。</p>
+<p>次のようにテストコードを変更してみましょう。</p>
+<pre><code>import (
+        &#34;fmt&#34; // fmtパッケージを追加
+        ...
+}
+
+func TestConvert(t *testing.T) {
+...
+
+        for _, tt := range tests {
+                name := fmt.Sprintf(&#34;number:%v&#34;, tt.n) // テストの名前
+
+                // サブテストとして実行
+                t.Run(name, func(t *testing.T) {
+                        got := fizzbuzz.Convert(n)
+                        if got != tt.want {
+                                t.Errorf(`Convert(%v) = %q but want %q`, tt.n, got, tt.want)
+                        }
+                })
+        }
+}</code></pre>
+<p><code>t.Run</code>メソッドは、第1引数がテストケース名、第2引数がテストとして実行する関数となっています。</p>
+<p>この状態でテストを実行すると次のような出力が得られます。</p>
+<pre>$ go test -v
+=== RUN   TestConvert
+=== RUN   TestConvert/number:1
+=== RUN   TestConvert/number:2
+=== RUN   TestConvert/number:3
+=== RUN   TestConvert/number:4
+=== RUN   TestConvert/number:5
+=== RUN   TestConvert/number:6
+=== RUN   TestConvert/number:7
+=== RUN   TestConvert/number:8
+=== RUN   TestConvert/number:9
+=== RUN   TestConvert/number:10
+=== RUN   TestConvert/number:11
+=== RUN   TestConvert/number:12
+=== RUN   TestConvert/number:13
+=== RUN   TestConvert/number:14
+=== RUN   TestConvert/number:15
+--- PASS: TestConvert (0.00s)
+    --- PASS: TestConvert/number:1 (0.00s)
+    --- PASS: TestConvert/number:2 (0.00s)
+    --- PASS: TestConvert/number:3 (0.00s)
+    --- PASS: TestConvert/number:4 (0.00s)
+    --- PASS: TestConvert/number:5 (0.00s)
+    --- PASS: TestConvert/number:6 (0.00s)
+    --- PASS: TestConvert/number:7 (0.00s)
+    --- PASS: TestConvert/number:8 (0.00s)
+    --- PASS: TestConvert/number:9 (0.00s)
+    --- PASS: TestConvert/number:10 (0.00s)
+    --- PASS: TestConvert/number:11 (0.00s)
+    --- PASS: TestConvert/number:12 (0.00s)
+    --- PASS: TestConvert/number:13 (0.00s)
+    --- PASS: TestConvert/number:14 (0.00s)
+    --- PASS: TestConvert/number:15 (0.00s)
+PASS</pre>
+<p>今回のFizzBuzzでは単なる連番であるためそこまで重要性を感じないかもしれませんが、どういったパターンがテストされているのか分かるのは便利です。</p>
+<h2 is-upgraded>テストを並列実行する</h2>
+<p>今回のテストパターンはそれぞれを独立して実行させても問題ありません。</p>
+<p>以下のようにテストコードを変更して並列実行させてみましょう。</p>
+<pre><code>func TestConvert(t *testing.T) {
+        ...
+
+        for _, tt := range tests {
+                tt := tt // ローカル変数を用意
+                name := fmt.Sprintf(&#34;number:%v&#34;, tt.n)
+
+                t.Run(name, func(t *testing.T) {
+                        t.Parallel() // 並列実行するように
+                        got := fizzbuzz.Convert(tt.n)
+                        if got != tt.want {
+                                t.Errorf(`Convert(%v) = %q but want %q`, tt.n, got, tt.want)
+                        }
+                })
+        }
+}</code></pre>
+<p><code>t.Run</code>メソッドに与えている関数がループ毎の<code>tt</code>をキャプチャできるようにループの先頭でローカル変数を用意しています。</p>
+<aside class="warning"><p>これはGo言語の初心者が陥りがちなところです。</p>
+<p><a href="https://speakerdeck.com/budougumi0617/traps-and-explanations-in-go?slide=24" target="_blank">初級者向けGoの落とし穴と解説：p24</a></p>
+</aside>
+<p>また、<code>t.Run</code>メソッド内で<code>t.Parallel</code>メソッドを呼び出し並列実行するように指定しています。</p>
+<p>このようにすることでテストが並列化されて実行されるようになります。</p>
+<aside class="warning"><p>個々のテスト実行に時間がかかる場合は、並列化によってテスト実行全体を高速化することに繋がります。しかし、並列化によるオーバーヘッドによって逆に遅くなったり、並列化特有の問題が発生することもあります。テストにおいても並列化は本当に必要になった場合に利用を検討するとよいでしょう。</p>
+</aside>
+<p>なおデフォルトでは<code>GOMAXPROCS</code>の数（デフォルトではCPUのコア数）で並列化されますが、<code>-parallel n</code>オプションを実行時に与えることでnの数で並列化が行われるようになります。次は並列数として2を指定する例です。</p>
+<pre>$ go test -v -parallel 2</pre>
+<h2 is-upgraded>テスト用のヘルパー関数を用意する</h2>
+<p>最後に<code>t.Run</code>メソッド内で記述しているテスト用のコードをメソッドとして抽出して見通しを良くしてみましょう。</p>
+<p>次のようにテストコードを変更します。</p>
+<pre><code>func TestConvert(t *testing.T) {
+        ...
+
+        for _, tt := range tests {
+                tt := tt
+                name := fmt.Sprintf(&#34;number:%v&#34;, tt.n)
+
+                t.Run(name, func(t *testing.T) {
+                        t.Parallel()
+                        testFizzBuzz(t, tt.n, tt.want) // 関数を呼び出すように変更
+                })
+        }
+}
+
+// テスト関数として抽出
+func testFizzBuzz(t *testing.T, n int, want string) {
+        t.Helper()
+        got := fizzbuzz.Convert(n)
+        if got != want {
+                t.Errorf(`Convert(%v) = %q but want %q`, n, got, want)
+        }
+}</code></pre>
+<p><code>testFizzBuzz</code>関数の先頭で<code>t.Helper</code>メソッドを呼び出していますが、これはテストが失敗した時に報告されるエラー行を<code>testFizzBuzz</code>関数の呼び出し元にする効果があります。これを呼び出さなかった場合にテストが失敗すると、報告されるエラー行は以下のように<code>testFizzBuzz</code>関数内で<code>t.Errorf</code>メソッドを呼び出している箇所になってしまいます。</p>
+<pre>--- FAIL: TestConvert/number:1 (0.00s)
+    fizzbuzz_test.go:47: Convert(1) = &#34;1&#34; but expect &#34;Foo&#34;
+
+#
+# t.Helperを利用しない場合、t.Errorf関数の位置で失敗したと報告される
+#
+
+t.Errorf(`Convert(%v) = %q but want %q`, n, got, want) # L47</pre>
+<p><code>t.Helper</code>メソッドを利用した場合、<code>testFizzBuzz</code>関数の呼び出し元で失敗したと報告されます。</p>
+<pre>--- FAIL: TestConvert/number:1 (0.00s)
+    fizzbuzz_test.go:38: Convert(1) = &#34;1&#34; but expect &#34;Foo&#34;
+
+#
+# t.Helperを利用した場合、testFizzBuzz関数の位置で失敗したと報告される
+#
+
+testFizzBuzz(t, tt.n, tt.expect) #L38</pre>
+<p>最後にテストを実行して、問題なくパスすることを確認しましょう。</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="おつかれさまでした！" duration="2">
+        <p>このコードラボを通じて、TDDのサイクルである <strong>Red / Green / Refactor</strong> を何度も回しながらFizzBuzzを完成させました！</p>
+<p>実装コード・テストコードともに見通しがよく<strong>クリーンな状態</strong>になっていますし、自動化されたテストコードのおかげで<strong>仕様変更やリファクタリングも自信をもって行う</strong>ことができるでしょう。</p>
+<h2 class="checklist" is-upgraded>What you&#39;ll learn</h2>
+<ul class="checklist">
+<li>TDDのサイクルである Red → Green → Refactor のリズムを体験した</li>
+<li>TDDのテクニックである「仮実装（Fake It）」「三角測量」「明白な実装」を学んだ</li>
+<li>Go言語の標準パッケージに含まれる<code>testing</code>パッケージを利用したテストの書き方を学んだ</li>
+<li>テーブル駆動テストのやり方を学んだ</li>
+<li>サブテスト、並列実行、ヘルパー関数の作成方法を学んだ</li>
+<li>いっぺんに全部やろうとせず一歩ずつ確実に進める感覚を理解した</li>
+<li>不安や自信などの感情を大切にすることを理解した</li>
+</ul>
+<p><strong>それでは、よきTDDライフを！</strong></p>
+<h2 is-upgraded>One more thing</h2>
+<p>今回の題材はさすがに簡単すぎて退屈だったでしょうか？あるいは物足りないでしょうか？</p>
+<p>TDDBC（TDD Bootcamp）というイベントで題材として使われている、ポーカーをTDDで実装してみるのも面白いでしょう。</p>
+<p><a href="http://devtesting.jp/tddbc/?TDDBC%E4%BB%99%E5%8F%B007%2F%E8%AA%B2%E9%A1%8C" target="_blank">TDDBC仙台07課題：ポーカー</a></p>
+
+
+      </google-codelab-step>
+    
+  </google-codelab>
+
+  <script src="https://storage.googleapis.com/codelab-elements/native-shim.js"></script>
+  <script src="https://storage.googleapis.com/codelab-elements/custom-elements.min.js"></script>
+  <script src="https://storage.googleapis.com/codelab-elements/prettify.js"></script>
+  <script src="https://storage.googleapis.com/codelab-elements/codelab-elements.js"></script>
+
+</body>
+</html>
