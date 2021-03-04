@@ -1,0 +1,33 @@
+version: '3.7'
+services:
+  db:
+    image: mysql:5.7
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_USER: root
+      MYSQL_ROOT_PASSWORD: passw0rd
+      MYSQL_DATABASE: camphorws2021dev
+    volumes:
+      - db-volume:/var/lib/mysql
+      - ./docker/db/my.cnf:/etc/mysql/conf.d/my.cnf
+      - ./docker/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      CAMPHORWS_PORT: 8080
+      CAMPHORWS_DBHOST: db
+      CAMPHORWS_DBPORT: 3306
+      CAMPHORWS_DBUSERNAME: root
+      CAMPHORWS_DBPASSWORD: passw0rd
+      CAMPHORWS_DBNAME: camphorws2021dev
+      CAMPHORWS_SECRETKEY: JDJhJDEwJDE5clFvMFJJdkI1T0xBSlF6ci50Ny42am84Vjd4YXYwYVN0UHFuZTF4N1ZlbzFHdjBzd0dh
+    restart: always
+    depends_on:
+      - db
+volumes:
+  db-volume:

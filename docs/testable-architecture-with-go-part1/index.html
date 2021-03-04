@@ -1,0 +1,392 @@
+
+<!doctype html>
+
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, minimum-scale=1.0, initial-scale=1.0, user-scalable=yes">
+  <meta name="theme-color" content="#4F7DC9">
+  <meta charset="UTF-8">
+  <title>テスタビリティの高いGoのAPIサーバを開発しよう（その1 ~準備&amp;E2E実装編~）</title>
+  <link rel="stylesheet" href="//fonts.googleapis.com/css?family=Source+Code+Pro:400|Roboto:400,300,400italic,500,700|Roboto+Mono">
+  <link rel="stylesheet" href="//fonts.googleapis.com/icon?family=Material+Icons">
+  <link rel="stylesheet" href="https://storage.googleapis.com/codelab-elements/codelab-elements.css">
+<link rel="stylesheet" href="../assets/style.css">
+  <style>
+    .success {
+      color: #1e8e3e;
+    }
+    .error {
+      color: red;
+    }
+  </style>
+</head>
+<body>
+  <google-codelab-analytics gaid="UA-101877661-28"></google-codelab-analytics>
+  <google-codelab codelab-gaid=""
+                  id="testable-architecture-with-go-part1"
+                  title="テスタビリティの高いGoのAPIサーバを開発しよう（その1 ~準備&amp;E2E実装編~）"
+                  environment="web"
+                  feedback-link="https://github.com/DeNA/codelabs/issues">
+    
+      <google-codelab-step label="概要" duration="5">
+        <p>このCodelabは、準備編・リファクタ編・テスト実装編の3つのChapterに分かれて、Testabilityの低いGoのAPI ServerからTestabilityの高い設計へリファクタを行います。 その過程でTestabilityに関する知識や、設計に関する知識、Test Doubleなどのテクニックについて学びます。</p>
+<p>それぞれのChapterの最初に必要な知識を学び、その後実際に手を動かして実装する、という構成になっています。</p>
+<h2 is-upgraded>事前知識として必要なもの</h2>
+<ul>
+<li>Goの文法の基本的な理解</li>
+<li>Goのtestに関する基本的な理解</li>
+</ul>
+<aside class="warning"><p>このCodelabでは、Goの文法や基本的なテストの実装・実行方法などは扱いません。</p>
+</aside>
+<aside class="warning"><p><strong>editor/IDEの設定について<br></strong> このCodelabでは、packageのimportやreformattingの作業は省略してあります。適宜<code>goimports</code>等のコマンドを実行してください。 （Editor, IDEに設定することをおすすめします）</p>
+</aside>
+<h2 is-upgraded>テスタビリティおよびリファクタについて</h2>
+<p>まず、本編に入る前に本Codelabのテーマであるテスタビリティについて簡単に考えてみたいと思います。</p>
+<h3 is-upgraded>テスタビリティとは</h3>
+<p><a href="https://shop.nikkeibp.co.jp/front/commodity/0000/P81540/" target="_blank">ソフトウェアテスト293の法則(日経BP社)</a>ではテスタビリティ（=テスト容易性）について以下のように記述しています。</p>
+<aside class="special"><p><strong>「テスト容易性とは可視性と操作性である」<br>「ソフトウェアの動作を監視したり、状態を操作したりする機能を組み込めば、よりテストが容易になる」<br></strong></p>
+</aside>
+<p>つまり、システムの「状態」を操作・シュミレートできるかがテスタビリティの1つの要素ということができます。</p>
+<p>今回のサンプルアプリケーションでもある、ユーザを登録するAPIを例にして具体的に考えてみましょう。 もしこのAPIにemail addressの重複は許さないという仕様があると、この仕様に関するテストを行うためにはemail addressが重複するような状態を作り出さなければいけません。 テスト時にこの状態をどれだけ「簡単」に「安定して」作り出せるかがテスタビリティの要素ということになります。</p>
+<h3 is-upgraded>リファクタリングとは</h3>
+<p><a href="https://www.ohmsha.co.jp/book/9784274224546/" target="_blank">リファクタリング 既存のコードを安全に改善する(Martin Fawler)</a>によると、次のように定義されています。</p>
+<aside class="special"><p><strong>「ソフトウェアの外部の振る舞いを保ったままで、内部の構造を改善していく作業」<br></strong></p>
+</aside>
+<p>実践する上では、外部の振る舞いを担保するような仕組み、つまり自動テストが必須になってきます。 今回のCodelabでは、このためのテストとして簡単なE2Eテストを実装して行こうと思います。 なお、今回実装するような、リファクタのための外部の振る舞いが変わっていないことを一気通貫でチェックするテストのことを <strong>ピンニングテスト</strong> と呼びます。</p>
+<aside class="warning"><p>後で行うChapter3ではリファクタした後に同様のロジックをチェックするテストを実装します。 今回書くピニングテストのテストのSetupの手順を覚えておき、後でリファクタ後のテストのSetupの手順と比べてみましょう。</p>
+</aside>
+<h2 is-upgraded>まとめ</h2>
+<p>テスタビリティとリファクタリングという概念について改めて整理しました。 次のStepから実際にサンプルアプリケーションを動かし、リファクタの前の前準備としての <strong>ピンニングテスト</strong> を実装していきたいと思います。</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="事前準備" duration="5">
+        <h2 is-upgraded>推奨環境</h2>
+<p>実行環境として、下記が必要です。ここでは環境構築について割愛しますので、各自構築をお願いします。</p>
+<ul>
+<li>Go 1.13以上</li>
+<li>Docker 1.19以上</li>
+<li>docker-compose 1.19以上</li>
+<li>git</li>
+<li>make</li>
+</ul>
+<h2 is-upgraded>サンプルアプリケーションのダウンロード</h2>
+<aside class="warning"><p>この手順ではDockerによりMySQLを立ち上げます。3306番のportが空いていることを確認してください。<br></p>
+</aside>
+<ol type="1">
+<li>レポジトリからcloneしてくる  <pre><code>$ git clone git@github.com:DeNA/codelabs.git
+</code></pre>
+</li>
+<li>サンプルコードのrootへいく  <pre><code>$ cd codelabs/sources/testable-architecture-with-go
+</code></pre>
+</li>
+<li>プロジェクトのrootでmakeを実行する  <pre><code>$ make
+</code></pre>
+</li>
+<li>テストを実行する  <pre><code>$ make test/e2e
+</code></pre>
+test用のDBが立ち上がり、testが実行されます。 以下のようにTestがpassすればOKです  <pre><code>go test -count=1 ./e2e/...
+ok  	github.dena.jp/swet/go-sampleapi/e2e	0.148s
+</code></pre>
+</li>
+</ol>
+<aside class="warning"><p>上記のコマンドを実行中に<code>[mysql] 2021/03/02 19:55:15 packets.go:36: unexpected EOF</code>のようなエラーメッセージが出ることがありますが、DBの立ち上がりを待っているためですので、無視してください。</p>
+</aside>
+<ol type="1">
+<li>完了</li>
+</ol>
+<p>おつかれさまです！ サンプルアプリケーションのダウンロード・テストはこれにて完了です。次の章ではアプリケーションのコードをレビューし、仕様と構造を把握しましょう。</p>
+<aside class="special"><p><strong>Makefileについて<br></strong> 今回のサンプルコードでは、buildおよびTest実行のためにmakeコマンドを使っています。 これは、最初のバージョンだとTest実行のためにDBの立ち上げや接続待ちなど、複数のコマンドを叩く必要があるためです。 最後のChapterでリファクタリングが完了すると、GoコマンドのみでTestを実行できるようになります。</p>
+</aside>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="コードのレビュー" duration="5">
+        <p>ここではアプリケーションコードをレビューし、全体の構造を把握しましょう。</p>
+<h2 is-upgraded>全体構造について</h2>
+<p>まず、ディレクトリ構造から確認します。Step2でbuildが終了していると、下記のようなディレクトリ構造になっているかと思います。</p>
+<pre><code>.
+├── Dockerfile
+├── Makefile
+├── README.md
+├── answer
+├── bin
+├── docker
+├── docker-compose.yaml
+├── e2e
+├── go.mod
+├── go.sum
+├── main.go
+├── internal
+│   ├── apierr
+│   ├── config
+│   ├── handler
+│   ├── logging
+│   ├── model
+│   └── validator
+├── tools
+├── spec.md
+└── vendor
+</code></pre>
+<p>プロジェクト直下には <code>main.go</code> があり、アプリケーションのentrypointとなります。 <code>spec.md</code>には、アプリケーションのAPIの詳しい仕様が記述されています。一度目を通して、仕様を把握しましょう。</p>
+<p><code>internal</code>以下に<code>handler</code>や<code>config</code>などの主要なパッケージが配置してあります。 <code>internal/model</code> にはDB Accessの際に用いる構造体を格納しており、便宜的に<code>model</code>というpackage名にしています。 <code>internal/handler</code>の中に、メインのロジックが実装されている<code>user.go</code>を設置しています。 <code>internal/handler/user.go</code>をエディタで開いて、中をレビューしてみましょう。</p>
+<p>なお、<code>answer</code>には今回のCodelabでの最終形が配置されています。 もしどうしてもわからないようでしたら参照してください。</p>
+<h2 is-upgraded>handlerの実装について</h2>
+<p><code>user.go</code>ではhttp request/responseのjsonをbindingする構造体、DBのデータをbindingする構造体の他に、 <code>PostUser</code>という<code>http.HandlerFunc</code>を返す関数が定義されていると思います。 <code>PostUser</code>では、<code>db</code>, <code>logger</code> などの依存のモジュールを受け取り、<code>http.HandlerFunc</code>を作成しています。</p>
+<p><code>PostUser</code>の中をレビューして、処理の流れを把握してみましょう。以下のような流れで実装してあります。</p>
+<ol type="1">
+<li>jsonからGoのstructへのbind</li>
+<li>validation (libraryとして<a href="https://github.com/go-playground/validator" target="_blank">go-playground/validator</a>を使っています）</li>
+<li>データが正当かどうかのチェック</li>
+<li>DBへのinsert</li>
+<li>http responseの作成とwrite</li>
+</ol>
+<p>特に、3のデータが正当化かどうかのチェックの部分が一見複雑でわかりにくいかもしれません。 ピックアップしてチェックしてみましょう。</p>
+<pre><code language="language-go" class="language-go">// 3. データが正当かどうかのチェックを行う
+// emailによりuserの存在チェックを行う
+var id int
+err = db.GetContext(ctx, &amp;id, &#34;SELECT id from users where email = ?&#34;, user.Email)
+
+if err != nil &amp;&amp; err != sql.ErrNoRows { // sql.ErrNoRows以外のerrorが発生しているケース
+	logger.Warnf(&#34;select failed: %+v&#34;, err)
+	writeError(w, http.StatusInternalServerError, ErrInternalServerError)
+	return
+} else if err == nil { // errが発生していないケース、つまりuserが存在しているケース
+	writeError(w, http.StatusBadRequest, ErrEmailAlreadyExists)
+	return
+}
+</code></pre>
+<p>重複したEmailでの登録を許さないという仕様なので、DBを叩いてEmailがすでに存在しているかどうかをチェックしています。 <code>SELECT</code>をDBに発行してチェックを行っていますが、重要なのはレコードが存在しない場合、つまり、<code>sql.ErrNoRows</code>のエラーが返ってきている場合がOKという、ロジックが反転した作りになっています。</p>
+<p>このように、直感的ではないロジックの部分は特にテストを書いて正当性をチェックしたいところですが、<code>handler</code>の中にすべての処理が書かれているため、この部分だけをピックアップしてテストすることが難しい作りになっています。</p>
+<p><strong>今回のCodelabではこのような処理を切り出し、簡単にテストできるようにするための方法を学びます。</strong></p>
+<h2 is-upgraded>使用ライブラリについて</h2>
+<p>このアプリケーションでは、便宜的に以下のライブラリを利用しています。 標準ではありませんが、広く使われているライブラリです。 もし興味がある方は調べてみてください。</p>
+<ul>
+<li><a href="https://github.com/jmoiron/sqlx" target="_blank">jmoiron/sqlx</a>  <ul>
+<li>DB accessのライブラリ</li>
+</ul>
+</li>
+<li><a href="https://github.com/go-playground/validator" target="_blank">go-playground/validator</a>  <ul>
+<li>http requestのJSON bodyをvalidationするのに使うライブラリ</li>
+</ul>
+</li>
+<li><a href="https://github.com/gorilla/mux" target="_blank">gorilla/mux</a>  <ul>
+<li>http routerのライブラリ</li>
+</ul>
+</li>
+<li><a href="https://github.com/sirupsen/logrus" target="_blank">sirupsen/logrus</a>  <ul>
+<li>loggerのライブラリ</li>
+</ul>
+</li>
+</ul>
+<h2 is-upgraded>まとめ</h2>
+<p>お疲れさまでした！ これでこのアプリケーションのコアな部分は把握できたと思います。</p>
+<p>それではこのアプリケーションをTestableな設計にリファクタしていきましょう！</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="ピンニングテストの実装" duration="15">
+        <p>改めてリファクタの定義を確認しますが、 リファクタリングは、「ソフトウェアの外部の振る舞いを保ったままで、内部の構造を改善していく作業」とされています。</p>
+<p>ここでは、「ソフトウェアの外部の振る舞いを保ったまま」の部分を保証する仕組みとして、このアプリケーションに対するE2Eテスト（ピンニングテスト）を実装してみましょう。</p>
+<h2 is-upgraded>テストの実装</h2>
+<p><code>e2e</code> ディレクトリ以下にある、<code>user_handler_test.go</code>を開いて見ましょう。 <code>Test_E2E_PostUser</code> というTestが実装されていると思います。これが、Step2で実施したTestの中身となっています。 <code>Test_E2E_PostUser</code>では、正常系、つまり、ユーザが正常に作成されているかをチェックしています。</p>
+<p>ソースを下にスクロールしていくと、<code>Test_E2E_PostUser_DuplicateEmail</code> という空の関数を見つけられるかと思います。 このTestを実装して行きましょう。このTestでは、関数名の通り、重複したEmailアドレスによるユーザ登録の挙動をチェックします。</p>
+<pre><code language="language-go" class="language-go">func Test_E2E_PostUser_DuplicateEmail(t *testing.T) {
+	// TODO: testを記述していく
+}
+</code></pre>
+<h3 is-upgraded>実行の確認</h3>
+<p>まず、対象のtestが正常に <strong>実行されているか</strong> を確認してみましょう。 testを書いたつもりでも、test runnerの設定等のミスで、実はそのテストが実行されていなかったというケースは意外とよくあるものです。 その防止のために、<code>Test_E2E_PostUser_DuplicateEmail</code>を以下のように修正してください。</p>
+<pre><code language="language-go" class="language-go">func Test_E2E_PostUser_DuplicateEmail(t *testing.T) {
+	t.Errorf(&#34;not implemented&#34;)
+}
+</code></pre>
+<p>このTestでは、 <strong>Failしていること</strong> を確認します。このTestがFailすれば、正常に実行されていることがわかると思います。 そして、再度testを実行してみましょう。</p>
+<pre><code>$ make test/e2e
+</code></pre>
+<p>以下のようにfailしていればOKです。</p>
+<pre><code>go test -count=1 ./e2e/...
+--- FAIL: Test_E2E_PostUser_DuplicateEmail (0.00s)
+    user_handler_test.go:76: not implemented
+FAIL
+FAIL	github.dena.jp/swet/go-sampleapi/e2e	1.419s
+FAIL
+make: *** [test/e2e] Error 1
+</code></pre>
+<p>それでは、記述した<code>t.Errorf(&#34;not implemented&#34;)</code> を削除し、Testの実装に入りましょう。</p>
+<aside class="warning"><p>全てのTestの実装の際にこの手順を行う必要はありません。1番最初に1度だけ確かめれば十分です。ですが一番最初に使うTesting Frameworkや、慣れていないアプリケーションに対しTestを書く際には、動作を確認する意味で1度実行することをおすすめします。</p>
+</aside>
+<h3 is-upgraded>DBのSetup</h3>
+<p>Testに使うDataのセットアップ、および、Test終了時にDBをcleanupする仕組みを実装しましょう。 <code>Test_E2E_PostUser_DuplicateEmail</code> を下のように書き換えてください。</p>
+<pre><code language="language-go" class="language-go">func Test_E2E_PostUser_DuplicateEmail(t *testing.T) {
+	db := sqlx.MustConnect(&#34;mysql&#34;, config.Config().DBSrc())
+	defer func() {
+		db.MustExec(&#34;set foreign_key_checks = 0&#34;)
+		db.MustExec(&#34;truncate table users&#34;)
+		db.MustExec(&#34;set foreign_key_checks = 1&#34;)
+		db.Close()
+	}()
+
+	email := &#34;test@example.com&#34;
+
+	if _, err := db.Exec(&#34;insert into users(first_name, last_name, email, password_hash) values (?, ?, ?, ?)&#34;, &#34;dummy_first_name&#34;, &#34;dummy_last_name&#34;, email, &#34;dummy_password&#34;); err != nil {
+		t.Fatal(err)
+	}
+}
+</code></pre>
+<p>dbのconnectionを初期化し、<code>defer</code>の中で、DBの初期化と、<code>Close()</code> を行っています。 ここでは、 <code>test@example.com</code> というメールアドレスのユーザを予めDBにセットしておき、同じメールアドレスのユーザの登録を試みます。</p>
+<h3 is-upgraded>Requestの実行</h3>
+<p>それでは、Test用のServerに対しリクエストを行うコードを記述します。 先程書いたコードに続けて、以下のように実装してください。</p>
+<pre><code language="language-go" class="language-go">var body bytes.Buffer
+if err := json.NewEncoder(&amp;body).Encode(&amp;handler.ReqPostUserJSON{
+	FirstName: &#34;テスト姓&#34;,
+	LastName:  &#34;テスト名&#34;,
+	Email:     email,
+	Password:  &#34;passw0rd1234&#34;,
+}); err != nil {
+	t.Fatal(err)
+}
+
+req := httptest.NewRequest(http.MethodPost, &#34;/&#34;, &amp;body)
+rec := httptest.NewRecorder()
+handler.PostUser(db, logging.Logger()).ServeHTTP(rec, req)
+</code></pre>
+<p>Request Body用の構造体を作り、その後 標準の<a href="https://golang.org/pkg/net/http/httptest/" target="_blank">httptest</a>を使ってrequest/responseをシュミレートしています。 Goでは<a href="https://golang.org/pkg/net/http/httptest/" target="_blank">httptest</a>を使うことにより、 Serverをlistenさせることなくhttp request/responseのtestを行うことができます（<code>httptest.NewServer</code>を使うことにより、listenするようなserverを立ち上げることも可能です）。</p>
+<h3 is-upgraded>ResponseのAssertion</h3>
+<p>それでは、Responseを検証してみましょう。rec(<code>ResponseRecorder</code>)には、ResponseのStatusCodeやBodyが記録されています。 この中身をチェックすることにより、正しく仕様が満たせているかどうかをCheckします。</p>
+<p>続いて、以下のようにコードを記述してください。</p>
+<pre><code language="language-go" class="language-go">if rec.Code != http.StatusBadRequest {
+	t.Errorf(&#34;status code must be 400 but: %d&#34;, rec.Code)
+}
+
+var result handler.ResError
+if err := json.NewDecoder(rec.Body).Decode(&amp;result); err != nil {
+	t.Fatal(err)
+}
+
+// responseのMessageをチェックする
+if result.Message != string(handler.ErrEmailAlreadyExists) {
+	t.Errorf(&#34;error Message must be %s but %s&#34;, handler.ErrEmailAlreadyExists, result.Message)
+}
+</code></pre>
+<h3 is-upgraded>Test実行</h3>
+<p>それではtestを実行し、結果を確認しましょう。</p>
+<pre><code>$ make test/e2e
+....
+go test -count=1 ./e2e/...
+ok  	github.dena.jp/swet/go-sampleapi/e2e	0.220s
+</code></pre>
+<p>PassしていればOKです。 もしFailしていた場合、コードをチェックしてみましょう。今回書いたTestコードは以下のようになっているはずです。</p>
+<pre><code language="language-go" class="language-go">func Test_E2E_PostUser_DuplicateEmail(t *testing.T) {
+	db := sqlx.MustConnect(&#34;mysql&#34;, config.Config().DBSrc())
+	defer func() {
+		db.MustExec(&#34;set foreign_key_checks = 0&#34;)
+		db.MustExec(&#34;truncate table users&#34;)
+		db.MustExec(&#34;set foreign_key_checks = 1&#34;)
+		db.Close()
+	}()
+
+	email := &#34;test@example.com&#34;
+
+	if _, err := db.Exec(&#34;insert into users(first_name, last_name, email, password_hash) values (?, ?, ?, ?)&#34;, &#34;dummy_first_name&#34;, &#34;dummy_last_name&#34;, email, &#34;dummy_password&#34;); err != nil {
+		t.Fatal(err)
+	}
+
+	var body bytes.Buffer
+	if err := json.NewEncoder(&amp;body).Encode(&amp;handler.ReqPostUserJSON{
+		FirstName: &#34;テスト姓&#34;,
+		LastName:  &#34;テスト名&#34;,
+		Email:     email,
+		Password:  &#34;passw0rd1234&#34;,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, &#34;/&#34;, &amp;body)
+	rec := httptest.NewRecorder()
+	handler.PostUser(db, logging.Logger()).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf(&#34;status code must be 400 but: %d&#34;, rec.Code)
+	}
+
+	var result handler.ResError
+	if err := json.NewDecoder(rec.Body).Decode(&amp;result); err != nil {
+		t.Fatal(err)
+	}
+
+	// responseのMessageをチェックする
+	if result.Message != string(handler.ErrEmailAlreadyExists) {
+		t.Errorf(&#34;error Message must be %s but %s&#34;, handler.ErrEmailAlreadyExists, result.Message)
+	}
+}
+</code></pre>
+<h3 is-upgraded><code>t.Error</code>と<code>t.Fatal</code>の使い分け</h3>
+<p>Testが失敗した際 <code>t.Error</code>と<code>t.Fatal</code>の種類を使って表現していますが、Goにはtestを失敗させるために使う関数がいくつかあります。 以下にそれぞれの挙動の違いを載せます。</p>
+<table>
+<tr><td colspan="1" rowspan="1"><p>Testは失敗するか</p>
+</td><td colspan="1" rowspan="1"><p>Testの実行がStopするか</p>
+</td><td colspan="1" rowspan="1"><p>失敗時にメッセージを出力できるか</p>
+</td></tr>
+<tr><td colspan="1" rowspan="1"><p>t.Fail</p>
+</td><td colspan="1" rowspan="1"><p>yes</p>
+</td><td colspan="1" rowspan="1"><p>no</p>
+</td><td colspan="1" rowspan="1"><p>no</p>
+</td></tr>
+<tr><td colspan="1" rowspan="1"><p>t.FailNow</p>
+</td><td colspan="1" rowspan="1"><p>yes</p>
+</td><td colspan="1" rowspan="1"><p>yes</p>
+</td><td colspan="1" rowspan="1"><p>no</p>
+</td></tr>
+<tr><td colspan="1" rowspan="1"><p>t.Error</p>
+</td><td colspan="1" rowspan="1"><p>yes</p>
+</td><td colspan="1" rowspan="1"><p>no</p>
+</td><td colspan="1" rowspan="1"><p>yes</p>
+</td></tr>
+<tr><td colspan="1" rowspan="1"><p>t.Fatal</p>
+</td><td colspan="1" rowspan="1"><p>yes</p>
+</td><td colspan="1" rowspan="1"><p>yes</p>
+</td><td colspan="1" rowspan="1"><p>yes</p>
+</td></tr>
+</table>
+<p><code>t.Error</code>, <code>t.Fatal</code>はそれぞれ<code>t.Fail</code>, <code>t.FailNow</code>のメッセージが出力可能なバージョンです。 基本的にはメッセージが出力されたほうがTest失敗時の調査には有利なので、<code>t.Error</code>, <code>t.Fatal</code>を使うほうがおすすめです。 その上で、Testの実行をStopさせるかどうかで<code>t.Error</code>と<code>t.Fatal</code>を使い分けましょう。 例えば、JSONをGoのstructにmappingし、mappingされたstructの中身をチェックする、というシナリオを考えたときに、 JSONからGoのstructへのmappingがそもそも失敗したらその後のチェックを続けても意味がありません。 Test失敗のlogが大量に出ると、調査の妨げになるので、この場合は最初にmappingが完了した時点でtest自体を終了させるため、<code>t.Fatal</code>を活用したほうが良いケースかと考えられます。 このように、チェックに失敗したら後続の処理・チェックの意味がないものに関しては<code>t.Fatal</code>を使い、それ以外の一般的なチェックに関しては<code>t.Error</code>を使いましょう。</p>
+<h2 is-upgraded>完了</h2>
+<p>お疲れさまでした！これでEmailが重複していたときのケースのテストの実装が完了しました！ DBを操作しデータを挿入しEmailが重複している状態を作り出しました。 今回はテーブルが1つなので簡単ですが、より現実的には外部キー制約などで依存している多くのリレーションを再現する必要があり、DBを直接操作して状態を再現するのはコストが高くメンテナンスが難しい方法です。 続くChapterでより低コストにロジックをテストする方法について学びましょう。</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="(Optional) もっと多くのTest Caseを実装してみよう" duration="10">
+        <p>このアプリケーションには他にも仕様があり、チェックすべき項目があります。<code>spec.md</code>を元に、他のケースのテストを実装してみましょう。</p>
+<p>例えば、</p>
+<ul>
+<li>POST /usersに対するリクエストで、invalidなフォーマットのEmailを送るケース</li>
+<li>POST /usersに対するリクエストで、invalidなフォーマットのNameを送るケース</li>
+</ul>
+<p>などが考えられます。</p>
+<p><code>answer/e2e</code> の下に様々なケースを実装したコードを置いておきました。 参考にしながら、時間が許す限り実装してみてください。</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="完了" duration="0">
+        <p>このChapterはこれで完了です！おつかれさまでした！</p>
+<p>引き続きChapter2でテスタビリティの高いコードにしていく設計や方針を紹介していこうと思います。</p>
+<p><a href="https://dena.github.io/codelabs/testable-architecture-with-go-part2/#1" target="_blank">つづきはこちら</a></p>
+
+
+      </google-codelab-step>
+    
+  </google-codelab>
+
+  <script src="https://storage.googleapis.com/codelab-elements/native-shim.js"></script>
+  <script src="https://storage.googleapis.com/codelab-elements/custom-elements.min.js"></script>
+  <script src="https://storage.googleapis.com/codelab-elements/prettify.js"></script>
+  <script src="https://storage.googleapis.com/codelab-elements/codelab-elements.js"></script>
+  <script src="//support.google.com/inapp/api.js"></script>
+
+</body>
+</html>
