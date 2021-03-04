@@ -1,0 +1,394 @@
+
+<!doctype html>
+
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, minimum-scale=1.0, initial-scale=1.0, user-scalable=yes">
+  <meta name="theme-color" content="#4F7DC9">
+  <meta charset="UTF-8">
+  <title>テスタビリティの高いGoのAPIサーバを開発しよう（その2 ~リファクタ編~)</title>
+  <link rel="stylesheet" href="//fonts.googleapis.com/css?family=Source+Code+Pro:400|Roboto:400,300,400italic,500,700|Roboto+Mono">
+  <link rel="stylesheet" href="//fonts.googleapis.com/icon?family=Material+Icons">
+  <link rel="stylesheet" href="https://storage.googleapis.com/codelab-elements/codelab-elements.css">
+<link rel="stylesheet" href="../assets/style.css">
+  <style>
+    .success {
+      color: #1e8e3e;
+    }
+    .error {
+      color: red;
+    }
+  </style>
+</head>
+<body>
+  <google-codelab-analytics gaid="UA-101877661-28"></google-codelab-analytics>
+  <google-codelab codelab-gaid=""
+                  id="testable-architecture-with-go-part2"
+                  title="テスタビリティの高いGoのAPIサーバを開発しよう（その2 ~リファクタ編~)"
+                  environment="web"
+                  feedback-link="https://github.com/DeNA/codelabs/issues">
+    
+      <google-codelab-step label="概要" duration="5">
+        <p><a href="https://dena.github.io/codelabs/testable-architecture-with-go-part1/#1" target="_blank">前回はこちら</a></p>
+<p>このCodelabでは、Chapter1で使ったサンプルアプリケーションを、テスタビリティの高いのアーキテクチャにリファクタしていきます。 Chapter1で使ったサンプルアプリケーションは、<code>handler</code>と呼ばれるモジュールにすべての処理を書いたバージョンでした。 このChapterでは適切に責務を分割し、続くChapter3でテストを実装するために3層構造のアーキテクチャへリファクタをしていこうと思います。</p>
+<aside class="warning"><p>ここで紹介するアーキテクチャは、あくまで「テストしやすさ」の観点から選択しています。 実際のプロジェクトでは、開発規模やアプリケーションの特性によってアーキテクチャを選択してください。</p>
+</aside>
+<h2 is-upgraded>3層構造のアーキテクチャ</h2>
+<p>まずは3層構造のアーキテクチャについて解説します。　 システムを役割・責務ごとに3つの層に分割し、 <strong>それぞれのレイヤはひとつ下のレイヤにのみ</strong> 依存するように設計するアーキテクチャです。 伝統的にはデータの永続化層（DBなど）へアクセスするデータアクセス層、システムの中心のロジックを実装するビジネスロジック層、 システムのクライアントからの要求の受け付け、ビジネスロジックを呼び出すプレゼンテーション層から構成されます。</p>
+<p>模式図としては以下のようになります。</p>
+<p class="image-container"><img alt="layered" src="img/6a6e7e99129784c7.png"></p>
+<p>プレゼンテーション層はビジネスロジック層に、ビジネスロジック層はデータアクセス層にのみ依存するように設計します。 プレゼンテーション層がデータアクセス層にアクセスしたり、データアクセス層からビジネスロジック層へアクセスしたり、 といったようなことはおこらないようにしましょう。</p>
+<p>それぞれの層の責務をまとめて記載していきます。</p>
+<h3 is-upgraded>プレゼンテーション層（コントローラ）</h3>
+<ul>
+<li>クライアントからの呼び出しを吸収し、適切なビジネスロジックを呼び出し、クライアントへ適切なデータ形式で応答する層</li>
+<li>ビジネスロジック層に依存する</li>
+<li>APIクライアントとのやり取りを実装し隠蔽する</li>
+<li>API Serverの場合は、APIクライアントから送られてきたJSONをvalidationし、ビジネスロジックで使いやすいようにmappingした上で、ビジネスロジックを呼び出す。ビジネスロジックの呼び出し結果をJSONに再度mappingし、クライアントに適切なHTTP Status Codeとともに応答を返すという役割を持つ</li>
+</ul>
+<h3 is-upgraded>ビジネスロジック層（ユースケース）</h3>
+<ul>
+<li>APIサーバのメインとなるロジックが実装されるアプリケーションのメインの層</li>
+<li>データアクセス層に依存する</li>
+<li>ビジネスロジックを実装し隠蔽する</li>
+</ul>
+<h3 is-upgraded>データアクセス層（リポジトリ）</h3>
+<ul>
+<li>データの操作（SQL等）を行う層</li>
+<li>外部のDBに依存する</li>
+<li>データへのアクセスを実装し隠蔽する</li>
+</ul>
+<h2 is-upgraded>まとめ</h2>
+<p>Codelabでリファクタリングの対象とする3層構造のアーキテクチャについて解説しました。 次のStepから、サンプルアプリケーションを用いて実際にリファクタを行っていきます。</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="リファクタの準備" duration="5">
+        <p>確認のため、前回のチャプターで実装したテストを動かしてみましょう。レポジトリの直下で</p>
+<pre><code>$ make test/e2e
+</code></pre>
+<p>と実行してください。以下の通りにPASSするはずです。</p>
+<pre><code>go test -count=1 ./e2e/...
+ok  	github.dena.jp/swet/go-sampleapi/e2e	0.220s
+</code></pre>
+<p>PASSしたらリファクタの準備は完了です。次のStepからは早速リファクタに取り掛かりましょう。</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="共通変数の移動" duration="5">
+        <p><code>handler</code>の内部で使われている変数・定義のうち、他のlayerをまたぐものについて、<code>internal</code>以下のsub packageに配置し、 依存関係を整理しましょう。</p>
+<h2 is-upgraded>errorの移動</h2>
+<p><code>internal/handler/error.go</code>のうち、<code>APIError</code>の型定義と、<code>Err</code>から始まる定数を移動しましょう。 <code>internal/apierr</code>の<code>error.go</code>に、<code>handler/error.go</code>からcopyしましょう。</p>
+<pre><code language="language-internal/error.go" class="language-internal/error.go">package apierr
+
+type APIError string
+
+func (a APIError) Error() string {
+	return string(a)
+}
+
+const (
+	ErrBadRequest          APIError = &#34;不正なリクエストです&#34;
+	ErrInternalServerError APIError = &#34;サーバでエラーが発生しました&#34;
+	ErrEmailAlreadyExists  APIError = &#34;すでに登録されています&#34;
+	ErrUserNotExists       APIError = &#34;ユーザは存在しません&#34;
+)
+</code></pre>
+<p>次に、<code>handler/error.go</code> から、copyした部分を削除します。</p>
+<pre><code language="language-handler/error.go" class="language-handler/error.go">package handler
+
+import (
+	&#34;encoding/json&#34;
+	&#34;net/http&#34;
+)
+
+type ResError struct {
+	Message string `json:&#34;message&#34;`
+}
+
+func writeError(w http.ResponseWriter, code int, err error) {
+	w.Header().Set(&#34;Content-Type&#34;, &#34;application/json;charset=utf-8&#34;)
+	w.WriteHeader(code)
+	resp := &amp;ResError{Message: err.Error()}
+	json.NewEncoder(w).Encode(resp)
+}
+</code></pre>
+<p>この状態でbuildをしてみましょう。</p>
+<pre><code>$ make
+</code></pre>
+<p>以下のように、<code>internal/handler/user.go</code>にbuildでerrorが出るはずです。</p>
+<pre><code>go build -o bin/api .
+# github.dena.jp/swet/go-sampleapi/internal/handler
+internal/handler/user.go:38:41: undefined: ErrBadRequest
+internal/handler/user.go:44:41: undefined: ErrBadRequest
+internal/handler/user.go:51:50: undefined: ErrInternalServerError
+internal/handler/user.go:64:50: undefined: ErrInternalServerError
+internal/handler/user.go:67:41: undefined: ErrEmailAlreadyExists
+internal/handler/user.go:75:50: undefined: ErrInternalServerError
+internal/handler/user.go:83:50: undefined: ErrInternalServerError
+make: *** [build] Error 1
+</code></pre>
+<p>移動した<code>Err...</code>の定義が見つからなくなったので、buildが通らなくなっています。</p>
+<p>下のように、適宜<code>Err...</code>にpackageを追加していきましょう。</p>
+<pre><code>        // request validation
+        if err := validator.Validator.Struct(&amp;user); err != nil {
+-               writeError(w, http.StatusBadRequest, ErrBadRequest)
++               writeError(w, http.StatusBadRequest, apierr.ErrBadRequest)
+                return
+        }
+</code></pre>
+<p>追加し終えたらbuildを走らせてみましょう。</p>
+<pre><code>$ make
+</code></pre>
+<p>成功すればOKです。</p>
+<h2 is-upgraded>完了</h2>
+<p>変数・定義の移動はシンプルですが、重要なリファクタリングの一種です。 では、次はロジックの移動をしましょう。</p>
+<aside class="special"><p><strong>TIPS: IDEの機能を使う<br></strong> IDEの中には、この作業を自動で行ってくれるものもあります。<br> 例えばGoland(またはJetBrains系のIDE)では下のように、対象の定義・変数を右クリックし、<code>Refactoring =&gt; Move</code>から、目的のpackage・ファイルに移動させることができます。<br> その際、import等は自動でfixされるので、特に作業の必要はありません。 <img alt="refactor_move" src="img/b2b9f1c1f59f66f7.png"></p>
+</aside>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="repositoryの切り出し" duration="5">
+        <p><code>repository</code>とは、外部へのデータアクセスを抽象化する役割を果たすモジュールです。 今回のアプリケーションでは、データは全てMySQLに永続化されます。 ですので、今回の<code>repository</code>とは、MySQLへのアクセスを抽象化するモジュールとなります。</p>
+<p>それでは、<code>internal/handler/user.go</code>の<code>PostUser</code>関数の中を見て、MySQLに接続している部分を切り出して行きましょう。</p>
+<p><code>PostUser</code>の中では2箇所、 61行目の <code>select id from users ~</code> の部分と、 73行目の <code>insert into users ~</code>の部分が 見つかると思います。これらを個別のメソッドとして <code>internal/repository/user.go</code>に実装していこうと思います。</p>
+<h2 is-upgraded>Factory Method</h2>
+<p><code>internal/repository/user.go</code>を開き、中を見てみましょう。 <code>import</code> の下にこれから実装するメソッドの雛形が書かれています。</p>
+<pre><code language="language-go" class="language-go">...
+
+type User struct{}
+
+func NewUser() *User {
+	return &amp;User{}
+}
+
+...
+</code></pre>
+<p>最初の部分は、構造体の宣言と初期化のFactory Methodが記述されています。 Factory Methodではただ構造体のpointerをreturnしているだけですが、 もしこの構造体に <strong>依存</strong> が存在する場合は、このFactory Methodに引数で依存を渡すスタイルの実装にしていこうと思います。 依存があるパターンのFactory Methodの実装は、次の <code>usecase</code> のリファクタで見てみることにします。</p>
+<h2 is-upgraded>EmailからUserをGetするFunctionの切り出し</h2>
+<p>それでは、Emailから<code>User</code>を探してくるメソッドを実装してみましょう。このメソッドは、emailが重複したユーザが存在していなかどうかをチェックするために必要なものです。</p>
+<p>以下の雛形部分に対して実装していきます。</p>
+<pre><code language="language-go" class="language-go">func (u *User) FindByEmail(ctx context.Context, queryer sqlx.QueryerContext, email string) (*model.User, error) {
+	// TODO methodを実装する
+	panic(&#34;implement me&#34;)
+}
+</code></pre>
+<p>雛形の関数の引数をチェックしてみましょう。 第1引数で <a href="https://golang.org/pkg/context/#Context" target="_blank">context.Context</a>を受け取っています。 <code>context</code>は主に処理のキャンセルに用いられるものです。 http requestが途中で中断された場合に、DBのアクセスまで一貫して中断処理を行うためのGoの共通の仕組みです。</p>
+<p>第2引数で<a href="https://godoc.org/github.com/jmoiron/sqlx#QueryerContext" target="_blank">sqlx.QuererContext</a>を受け取っています。 これは、DBにアクセスするための<code>interface</code>で、実態は<a href="https://godoc.org/github.com/jmoiron/sqlx#DB" target="_blank">sqlx.DB</a>や <a href="https://godoc.org/github.com/jmoiron/sqlx#Tx" target="_blank">sqlx.Tx</a>などが考えられます。 また、今回は行いませんが、Test時にMock/Stub等を挟み込むことができ、実際にDBアクセスを行わなくてもTestが可能になります。</p>
+<p>第3引数では検索対象のemail addressを受け取っています。</p>
+<p>返り値としては、<code>*model.User</code>および、<code>error</code>が定義されています。</p>
+<p>さて、前置きが長くなってしまいましたが、メソッドを実装してみましょう。 <code>FindByEmail</code>の中を下記のように実装してください。</p>
+<pre><code language="language-go" class="language-go">func (u *user) FindByEmail(ctx context.Context, queryer sqlx.QueryerContext, email string) error {
+	var m model.User
+	if err := sqlx.GetContext(ctx, queryer, &amp;m, &#34;select * from users where email = ?&#34;, email); err == sql.ErrNoRows {
+		return nil, apierr.ErrUserNotExists // sql.ErrNoRowsを隠蔽するために、errorの翻訳を行っている
+	} else if err != nil {
+		return nil, err
+	}
+	return &amp;m, nil
+}
+</code></pre>
+<p>引数で与えられた<code>email</code>から、userを探し、構造体に値を格納して返しています。 <a href="https://godoc.org/github.com/jmoiron/sqlx#GetContext" target="_blank">sqlx.GetContext</a>というメソッドを使っています。 DBにレコードが存在しなかった場合、<code>sql.ErrNoRows</code>が返されるのですが、<code>repository</code>でDBの具体的な実装（ここではMySQLのこと）を隠蔽するために、<strong>エラー翻訳</strong>を行っています。</p>
+<p>これにてUserをemailで検索するメソッドは完成です。 このメソッドのtestについては、Chapter3で書いていくことにします。今はリファクタを続けていきましょう。</p>
+<h2 is-upgraded>Userを作成するFunctionの切り出し</h2>
+<p>つづいて、UserをDBにinsertするメソッドを実装してみましょう。 <code>Create</code>の中を見ます。</p>
+<pre><code language="language-go" class="language-go">func (u *User) Create(ctx context.Context, execer sqlx.ExecerContext, m *model.User) error {
+	// TODO methodを実装する
+	panic(&#34;implement me&#34;)
+}
+</code></pre>
+<p>第1引数<code>context</code>と、第2引数<code>sqlx.ExecerContext</code>、第3引数として、作成するユーザの情報が格納された構造体が渡されています。 <a href="https://godoc.org/github.com/jmoiron/sqlx#ExecerContext" target="_blank">sqlx.ExecerContext</a>は、 <code>sqlx.Queryer</code>と似たような役割をもつ構造体で、更新系のクエリを発行する場合は、こちらを使います。</p>
+<p>返り値は、<code>error</code>のみです。</p>
+<aside class="special"><p><strong>実装してみよう<br></strong> ここでは、具体的な手順は示しませんので、<code>FindByEmail</code>を参考にしながら、自分で実装してみましょう。</p>
+</aside>
+<p>実装にあたり、いくつかヒントを書いておきます。</p>
+<ul>
+<li>発行するSQLは <code>insert into users(first_name, last_name, email, password_hash) VALUES (?, ?, ?, ?)</code> です（<code>?</code>はplaceholder)。execerの<code>ExecContext</code>を使って、<code>INSERT</code>してみましょう。</li>
+<li>DBにinsertされた時点で<code>user</code>のIDが決まる（auto increment)ので、<code>execer.ExecContext</code>の返り値である、<code>ResultSet</code>のメソッドを呼び出し、<code>LastInsertID</code>を取得し、引数で渡されている <code>m *model.User</code> のIDにセットしましょう。</li>
+<li><code>FindByEmail</code>では <strong>エラー翻訳</strong> を行いましたが、<code>Create</code>では翻訳すべきエラーはありません（DBからのエラーは全て回復できないエラーとして、<code>return</code>しましょう）。</li>
+</ul>
+<p>実装が完了したら、<code>answer/internal/repository/user.go</code>を見て、回答と比べてみましょう。</p>
+<h2 is-upgraded>完了</h2>
+<p>これでSQLの切り出しは完了しました。次は、実装した<code>repository/user.go</code>の呼び出し部分をまとめた<code>usercase</code>を実装してみましょう。</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="usecaseの切り出し" duration="5">
+        <p>次に、business logicを実装する<code>usecase</code>へのリファクタをおこないましょう。 <code>internal/usecase/user.go</code>を見てみましょう。ここにもメソッドの雛形があります。</p>
+<h2 is-upgraded>Factory Method &amp; 型定義</h2>
+<p>まずは型定義とFactory Methodを見てみましょう。</p>
+<pre><code language="language-go" class="language-go">type userRepository interface {
+	FindByEmail(ctx context.Context, queryer sqlx.QueryerContext, email string) (*model.User, error)
+	Create(ctx context.Context, execer sqlx.ExecerContext, m *model.User) error
+}
+
+type User struct {
+	userRepo userRepository
+	db       *sqlx.DB
+}
+
+func NewUser(userRepo userRepository, db *sqlx.DB) *User {
+	return &amp;User{
+		userRepo: userRepo,
+		db:       db,
+	}
+}
+</code></pre>
+<p>前のStepで触れた、「依存があるパターンのFactory Method」が出てきています。 このように、依存がある場合はFactory Methodの引数で受け取るような実装に統一しましょう。(統一のメリットはあとで触れます）</p>
+<p>依存の定義についても注目してみましょう。 <code>userRepository</code>という<code>interface</code>が定義されています。前のStepで実装した<code>User</code>の <strong>型</strong> に直接依存するのを避け、 同じシグネチャを持つ<code>interface</code>を定義し、それに依存するようにしています。 このパターンにより、各layer間の結びつきを緩めることができ、 更にTest時に依存をmock/stubに簡単に差し替えられるようになり、簡単にtestを記述できるようになります。 詳しくは、次のChapterで触れます。</p>
+<h2 is-upgraded>User作成のUseCaseの実装</h2>
+<p><code>Create</code>の雛形を見てみましょう。</p>
+<pre><code language="language-go" class="language-go">func (u *User) Create(ctx context.Context, m *model.User) error {
+	// TODO methodを実装する
+	panic(&#34;implement me&#34;)
+}
+</code></pre>
+<p><code>context.Context</code>を第1引数、作成対象のuserのデータが入った構造体を第2引数で受け取っています。 第2引数で渡された<code>user</code>を使って、<code>repository</code>を呼び出し、ユーザ作成のロジックを書いてみましょう。</p>
+<pre><code language="language-go" class="language-go">func (u *User) Create(ctx context.Context, m *model.User) error {
+	_, err := u.userRepo.FindByEmail(ctx, u.db, m.Email)
+
+	// 不明なerrorの場合はwrapしてreturn
+	if err != apierr.ErrUserNotExists &amp;&amp; err != nil {
+		return fmt.Errorf(&#34;user find with email %s failed: %w&#34;, m.Email, err)
+	}
+	// errorが発生していない = Emailのuserが存在するということなので、errを返す
+	if err == nil {
+		return apierr.ErrEmailAlreadyExists
+	}
+
+	~省略~
+</code></pre>
+<p>メソッドの前半部分はこのように実装します。</p>
+<p>最初に<code>userRepository</code>の<code>FindByEmail</code>を呼び出しています。この際、第2引数の<code>sqlx.QueryerContext</code>は、 <code>usecase</code>の依存の、<code>*sqlx.DB</code>を渡すことができます <strong>(後で使う、sqlx.ExecerContextも同様です）</strong> 。</p>
+<p>その後のerror handlingは少し複雑な実装になっています。 まず、受け取ったパラメータを元に、<code>userRepository</code>の<code>FindByEmail</code>を呼び出し、作成可能なユーザかどうかのチェックを行っています。 このユースケースでは、<strong>指定したEmailのユーザが存在しないのが正常系</strong>なため、<code>repository</code>から、<code>ErrUserNotExists</code>が返ってくるのが正常です。 逆にユーザが存在してしまったケースは、<code>ErrEmailAddressAlreadyExists</code>というエラーを呼び出し側に返す実装になっています。 それ以外のエラーは原因が不明かつ、<code>usecase</code>で回復できないので、<code>err</code>を<code>Wrap</code>して、呼び出し側に返しています。 <code>error</code>の<code>Wrap</code>や、handlingについては、後で詳しく触れます。</p>
+<aside class="special"><p><strong>実装してみよう<br></strong> repositoryの <code>Create</code> を呼び出し、後半部分のユーザをDBにinsertするロジックを書いてみましょう。</p>
+</aside>
+<ul>
+<li><code>repository</code> から返ってきた他のerrorは<code>usecase</code>の層では回復できないので、<code>FindByEmail</code>のときと同様の手法で<code>Wrap</code>し、呼び出し側に<code>return</code>しましょう。</li>
+<li>wrapに関する詳しい情報は、<a href="https://blog.golang.org/go1.13-errors" target="_blank">このblog</a>の、 <strong>Wrapping errors with %w</strong> で説明されていますので、興味がある方は参照してください。</li>
+</ul>
+<p>実装が完了したら、<code>answer/internal/usecase/user.go</code>を見て、回答と比べてみましょう。</p>
+<h2 is-upgraded>完了</h2>
+<p>これで<code>usecase</code>の切り出しは完了です。それでは<code>handler</code>からこの<code>usecase</code>を呼び出して見ましょう。</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="handlerの修正" duration="5">
+        <p>それでは<code>handler</code>を修正し、実装した<code>usecase</code>のメソッドを使ってみましょう。</p>
+<p>まずは、<code>PostUser</code>の関数のシグネチャを修正しましょう。</p>
+<p><code>db</code>はもはや不要なので、代わりに<code>usecase</code>を受け取るように修正します。</p>
+<pre><code language="language-go" class="language-go">-func PostUser(db *sqlx.DB, logger *logrus.Logger) http.HandlerFunc {
++func PostUser(userUsecase *usecase.User, logger *logrus.Logger) http.HandlerFunc {
+</code></pre>
+<p>次に、 <strong>/* TODO: 以下の処理をusecaseとrepositoryに移す */</strong> というコメントが書いてある行から、 <strong>/* ここまで */</strong> というコメントがある行までを削除し、 以下のコードをcopyしてみましょう。</p>
+<pre><code language="language-go" class="language-go">m := &amp;model.User{
+	FirstName:    user.FirstName,
+	LastName:     user.LastName,
+	Email:        user.Email,
+	PasswordHash: string(hash),
+}
+err = userUsecase.Create(ctx, m) // ここでメソッドを呼び出している
+if errors.Is(err, apierr.ErrEmailAlreadyExists) {
+	writeError(w, http.StatusBadRequest, apierr.ErrEmailAlreadyExists)
+	return
+} else if err != nil {
+	logger.Errorf(&#34;user create failed with unknown err: %w&#34;, err)
+	writeError(w, http.StatusInternalServerError, apierr.ErrInternalServerError)
+	return
+}
+</code></pre>
+<p>usecaseの<code>Create</code>のメソッドを呼び出すのみといったコードです。 この<code>usecase</code>で、ハンドリングするべきエラーは<code>ErrEmailAlreadyExists</code>、つまり、作成しようとしたユーザがすでに存在してた場合のみです。 それ以外は、全て<code>Internal Server Error</code>として処理します。</p>
+<p>最後に、responseを返している箇所の<code>ID</code>だけ修正して、完了です。</p>
+<pre><code language="language-go" class="language-go">        json.NewEncoder(w).Encode(&amp;ResPostUserJSON{
+-               ID:        int(id),
++               ID:        m.ID,
+                FirstName: user.FirstName,
+                LastName:  user.LastName,
+                Email:     user.Email,
+</code></pre>
+<p><code>main.go</code>を修正し、<code>usecase</code>を初期化し、<code>db</code>の代わりに<code>usecase</code>を渡すようにしましょう。</p>
+<pre><code language="language-go" class="language-go">-       r.HandleFunc(&#34;/users&#34;, handler.PostUser(db, logger)).Methods(&#34;POST&#34;)
++       userUsecase := usecase.NewUser(repository.NewUser(), db)
++       r.HandleFunc(&#34;/users&#34;, handler.PostUser(userUsecase, logger)).Methods(&#34;POST&#34;)
+</code></pre>
+<p>buildが通れば修正完了です。</p>
+<pre><code>$ make
+go build -o bin/api .
+</code></pre>
+<h2 is-upgraded>(補足）error handlingについて</h2>
+<p>error handlingの方式について補足します。<br><code>usecase</code>から<code>return</code>された<code>err</code>をチェックする箇所で、<code>errors.Is</code>というメソッドを使っています。 これは<a href="https://golang.org/pkg/errors/#Is" target="_blank">Go1.13から追加されたメソッド</a>です。 基本的には、（特に今回のケースでは）下のように、<code>if</code>でチェックするスタイルと変わりはありません。</p>
+<pre><code language="language-go" class="language-go">if err == app.ErrEmailAlreadyExists {...}
+</code></pre>
+<p>ですが、<code>errors.Is</code>は、<code>Wrap</code>されたerrorでもチェックできます。 下のケースを見てみましょう。</p>
+<pre><code language="language-go" class="language-go">var Err = errors.New(&#34;err&#34;)
+
+func DoSomething() error {
+	return Err
+}
+
+func WrapSomething() error {
+	if err := DoSomething(); err != nil {
+		return fmt.Errorf(&#34;wrap: %w&#34;, err)  // `: %wでwrapする。（Go1.13からのStyle)`
+	}
+	return nil
+}
+
+func main() {
+	err := WrapSomething()
+	if err == Err {
+		log.Println(&#34;==での比較&#34;)
+	}
+	if errors.Is(err, Err) { // Wrapされたerrでも、元の型でハンドリング可能
+		log.Println(&#34;errors.Isでの比較&#34;)
+	}
+}
+</code></pre>
+<p><code>WrapSomething()</code> で <code>ErrEmailAlreadyExists</code> をWrapしています。 errorの<code>wrap</code>はstack traceを保持するために重要なテクニックとなるのですが、<code>==</code> でのhandlingができなくなってしまいます。 <code>errors.Is</code>ではその問題を解決しており、<code>Wrap</code>された<code>err</code>でも元の型でハンドリングすることが可能となっています。 他にも<a href="https://golang.org/pkg/errors/#example_As" target="_blank">errors.As</a>などの関数が用意されているので、調べてみてください。</p>
+<h2 is-upgraded>(補足）DIについて</h2>
+<p>usecaseを初期化している場所を見てみましょう</p>
+<pre><code language="language-go" class="language-go">userUsecase := usecase.NewUser(repository.NewUser(), db)
+</code></pre>
+<p>このように、<code>usecase</code>の依存を手動で組み立てています。今回のように、依存の関係がsimpleなものは特に問題は起こりませんが、 例えば、重層的な依存関係など、依存グラフが複雑になると、初期化のために膨大なコードを書かなければならない ケースがあるかとは思います。 (<strong>注： もちろんそうならないように設計するのがBestです</strong>) そういった問題を解決するために、GoでもDI(Dependency Injection)のライブラリを用いることがあります。 DIライブラリでは、依存の解決を簡単に行ってくれ、初期化時の不要なコードを削除できます。 もし、初期化の部分で複雑になりすぎていると感じるようでしたら、DIライブラリの導入を検討してみましょう。</p>
+<p>DIのライブラリでは、対象のモジュールのFactory Method（あるいはConstructor）を呼び出すことにより、依存を注入する実装のものが多いです。 DIライブラリを使わない場合でも、将来そういったライブラリを使用することを想定し、Factory Methodを用意しておくことをおすすめします。</p>
+<p>DIのライブラリは<a href="https://github.com/google/wire" target="_blank">wire</a>などのライブラリが有名です。 他にも有名なものがいくつかあるので、自分たちにあったものを探してみる、あるいは、開発してみるのも面白いかもしれません。</p>
+<h2 is-upgraded>完了</h2>
+<p>これでリファクタが完了しました。それではE2Eを実行し、外部の振る舞いが壊れていないかどうかをチェックしましょう。</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="E2Eの実行" duration="0">
+        <p>最後に、正しくリファクタが行われているかどうかを確かめるために、Chapter1で準備したE2E Testを流してみましょう。</p>
+<p><code>handler</code>の初期化部分（<code>db</code>を<code>usecase</code>に修正する）と、<code>error</code>のパッケージ変更により、そのままではビルドが通らなくなっているかと思います。 同様の修正を行い、buildが正しく通るようになった上で、テストを実行してみましょう。</p>
+<pre><code>$ make test/e2e
+</code></pre>
+<p>下記のようにPASSすればOKです。</p>
+<pre><code>go test -count=1 ./e2e/...
+ok  	github.dena.jp/swet/go-sampleapi/e2e	0.222s
+</code></pre>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="完了" duration="0">
+        <p>お疲れさまでした、これでリファクタは完了です。 次のChapterで、どのようにTestが書けるのかを試してみましょう。</p>
+<p><a href="https://dena.github.io/codelabs/testable-architecture-with-go-part3/#1" target="_blank">つづきはこちら</a></p>
+
+
+      </google-codelab-step>
+    
+  </google-codelab>
+
+  <script src="https://storage.googleapis.com/codelab-elements/native-shim.js"></script>
+  <script src="https://storage.googleapis.com/codelab-elements/custom-elements.min.js"></script>
+  <script src="https://storage.googleapis.com/codelab-elements/prettify.js"></script>
+  <script src="https://storage.googleapis.com/codelab-elements/codelab-elements.js"></script>
+  <script src="//support.google.com/inapp/api.js"></script>
+
+</body>
+</html>
