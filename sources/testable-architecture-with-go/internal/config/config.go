@@ -28,13 +28,13 @@ func (c *config) DBSrc() string {
 func Config() *config {
 	once.Do(func() {
 		appConfig = &config{
-			DBHost:     envOrDefault("CAMPHORWS_DBHOST", "localhost"),
-			DBPort:     envOrDefault("CAMPHORWS_DBPORT", "3306"),
-			DBUserName: envOrDefault("CAMPHORWS_DBUSERNAME", "root"),
-			DBPassword: envOrDefault("CAMPHORWS_DBPASSWORD", "passw0rd"),
-			DBName:     envOrDefault("CAMPHORWS_DBNAME", "camphorws2021dev"),
-			Port:       envOrDefault("CAMPHORWS_PORT", "8080"),
-			SecretKey:  envOrDefault("CAMPHORWS_SECRETKEY", "JDJhJDEwJDE5clFvMFJJdkI1T0xBSlF6ci50Ny42am84Vjd4YXYwYVN0UHFuZTF4N1ZlbzFHdjBzd0dh"),
+			DBHost:     envOrDefault("DENA_GO_WS_DBHOST", "localhost"),
+			DBPort:     envOrDefault("DENA_GO_WS_DBPORT", "3306"),
+			DBUserName: envOrDefault("DENA_GO_WS_DBUSERNAME", "root"),
+			DBPassword: envOrDefault("DENA_GO_WS_DBPASSWORD", "passw0rd"),
+			DBName:     envOrDefault("DENA_GO_WS_DBNAME", "denagows2021dev"),
+			Port:       envOrDefault("DENA_GO_WS_PORT", "8080"),
+			SecretKey:  envOrDefault("DENA_GO_WS_SECRETKEY", "JDJhJDEwJDE5clFvMFJJdkI1T0xBSlF6ci50Ny42am84Vjd4YXYwYVN0UHFuZTF4N1ZlbzFHdjBzd0dh"),
 		}
 	})
 

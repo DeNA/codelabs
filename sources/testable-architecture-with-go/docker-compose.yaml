@@ -1,13 +1,13 @@
 version: '3.7'
 services:
   db:
-    image: mysql:5.7
+    image: mysql:5.7 # M1 macを使っている方は mariadb:10.6を使ってください
     ports:
       - "3306:3306"
     environment:
       MYSQL_ROOT_USER: root
       MYSQL_ROOT_PASSWORD: passw0rd
-      MYSQL_DATABASE: camphorws2021dev
+      MYSQL_DATABASE: denagows2021dev
     volumes:
       - db-volume:/var/lib/mysql
       - ./docker/db/my.cnf:/etc/mysql/conf.d/my.cnf
@@ -19,13 +19,13 @@ services:
     ports:
       - "8080:8080"
     environment:
-      CAMPHORWS_PORT: 8080
-      CAMPHORWS_DBHOST: db
-      CAMPHORWS_DBPORT: 3306
-      CAMPHORWS_DBUSERNAME: root
-      CAMPHORWS_DBPASSWORD: passw0rd
-      CAMPHORWS_DBNAME: camphorws2021dev
-      CAMPHORWS_SECRETKEY: JDJhJDEwJDE5clFvMFJJdkI1T0xBSlF6ci50Ny42am84Vjd4YXYwYVN0UHFuZTF4N1ZlbzFHdjBzd0dh
+      DENA_GO_WS_PORT: 8080
+      DENA_GO_WS_DBHOST: db
+      DENA_GO_WS_DBPORT: 3306
+      DENA_GO_WS_DBUSERNAME: root
+      DENA_GO_WS_DBPASSWORD: passw0rd
+      DENA_GO_WS_DBNAME: denagows2021dev
+      DENA_GO_WS_SECRETKEY: JDJhJDEwJDE5clFvMFJJdkI1T0xBSlF6ci50Ny42am84Vjd4YXYwYVN0UHFuZTF4N1ZlbzFHdjBzd0dh
     restart: always
     depends_on:
       - db
